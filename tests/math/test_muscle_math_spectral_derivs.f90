@@ -57,6 +57,10 @@ program test_derivatives
     call test_second_derivative(passed)
     if (.not. passed) STOP 2
 
+    ! Jacobi eigen-decomposition used by the spectral-function derivatives
+    call test_eigen_sym3(passed)
+    if (.not. passed) STOP 3
+
     STOP 0
 end program test_derivatives
 
@@ -1184,3 +1188,104 @@ subroutine test_second_derivative(passed)
     if (.not. passed) return
 
 end subroutine
+subroutine test_eigen_sym3(passed)
+    ! eigen_sym3: Sigma = V diag(lam) V^T, V orthonormal, lam descending, for distinct,
+    ! doubly and triply repeated, nearly repeated, zero and badly scaled tensors;
+    ! eigenvalues agree with eigenvals where the spectrum is well separated;
+    ! spectral_rotate/spectral_compose are consistent with each other.
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_math_operations, only : eigenvals
+    use muscle_math_spectral_derivs, only : eigen_sym3, spectral_rotate, spectral_compose
+    implicit none
+    logical, intent(out) :: passed
+
+    real(real64), parameter :: TOL = 1.0D-13
+    type(ten_3D2Osym) :: t, r
+    real(real64) :: cases(6,10), lam(3), v(3,3), eye(3,3), z(3,3), ref(3), scale
+    integer :: i, j
+
+    cases(:,1)  = [1.0D0, 2.0D0, 3.0D0, 0.0D0, 0.0D0, 0.0D0]
+    cases(:,2)  = [2.0D0/3.0D0, -1.0D0/3.0D0, -1.0D0/3.0D0, 0.0D0, 0.0D0, 0.0D0]
+    cases(:,3)  = [5.0D0, 5.0D0, 5.0D0, 0.0D0, 0.0D0, 0.0D0]
+    cases(:,4)  = [0.0D0, 0.0D0, 0.0D0, 0.0D0, 0.0D0, 0.0D0]
+    cases(:,5)  = [0.0D0, 0.0D0, 0.0D0, 2.0D0, 0.0D0, 0.0D0]
+    cases(:,6)  = [1.2D0, -0.3D0, 0.4D0, 0.25D0, 0.11D0, -0.17D0]
+    cases(:,7)  = 1.0D-12*[1.2D0, -0.3D0, 0.4D0, 0.25D0, 0.11D0, -0.17D0]
+    cases(:,8)  = 1.0D12*[1.2D0, -0.3D0, 0.4D0, 0.25D0, 0.11D0, -0.17D0]
+    ! rotated double root: 3 n(x)n with n = (1,2,3)/sqrt(14), shifted
+    cases(:,9)  = [3.0D0/14.0D0 - 1.0D0, 12.0D0/14.0D0 - 1.0D0, 27.0D0/14.0D0 - 1.0D0, &
+                   6.0D0/14.0D0, 18.0D0/14.0D0, 9.0D0/14.0D0]
+    cases(:,10) = [1.0D0 + 1.0D-14, 1.0D0, -2.0D0, 1.0D-15, 0.0D0, 0.0D0]
+
+    eye = 0.0D0
+    eye(1,1) = 1.0D0
+    eye(2,2) = 1.0D0
+    eye(3,3) = 1.0D0
+
+    passed = .true.
+    do i = 1, size(cases, 2)
+        t%vals = cases(:,i)
+        scale = maxval(abs(t%vals))
+        if (scale == 0.0D0) scale = 1.0D0   ! zero tensor: absolute tolerance
+        call eigen_sym3(t, lam, v)
+
+        ! orthonormality
+        if (maxval(abs(matmul(transpose(v), v) - eye)) > TOL) then
+            print *, "eigen_sym3: eigenvectors not orthonormal, case", i
+            passed = .false.
+        end if
+        ! reconstruction: V diag(lam) V^T = Sigma
+        z = 0.0D0
+        do j = 1, 3
+            z(j,j) = lam(j)
+        end do
+        r = spectral_compose(v, z)
+        if (maxval(abs(r%vals - t%vals)) > TOL*scale) then
+            print *, "eigen_sym3: reconstruction failed, case", i, r%vals - t%vals
+            passed = .false.
+        end if
+        ! descending order
+        if (lam(1) < lam(2) .or. lam(2) < lam(3)) then
+            print *, "eigen_sym3: eigenvalues not descending, case", i, lam
+            passed = .false.
+        end if
+        ! V^T Sigma V is diagonal with the eigenvalues
+        z = spectral_rotate(v, t)
+        do j = 1, 3
+            z(j,j) = z(j,j) - lam(j)
+        end do
+        if (maxval(abs(z)) > TOL*scale) then
+            print *, "eigen_sym3: V^T Sigma V is not diag(lam), case", i
+            passed = .false.
+        end if
+        ! agreement with eigenvals on the well-separated cases
+        if (i == 1 .or. i == 6 .or. i == 8) then
+            ref = eigenvals(t)
+            if (maxval(abs(ref - lam)) > 1.0D-12*scale) then
+                print *, "eigen_sym3: eigenvalues differ from eigenvals, case", i, lam, ref
+                passed = .false.
+            end if
+        end if
+    end do
+
+    ! Known spectra
+    t%vals = cases(:,2)
+    call eigen_sym3(t, lam, v)
+    if (maxval(abs(lam - [2.0D0/3.0D0, -1.0D0/3.0D0, -1.0D0/3.0D0])) > TOL) then
+        print *, "eigen_sym3: wrong eigenvalues for the uniaxial deviator", lam
+        passed = .false.
+    end if
+    t%vals = cases(:,5)
+    call eigen_sym3(t, lam, v)
+    if (maxval(abs(lam - [2.0D0, 0.0D0, -2.0D0])) > TOL) then
+        print *, "eigen_sym3: wrong eigenvalues for pure shear", lam
+        passed = .false.
+    end if
+    t%vals = cases(:,9)
+    call eigen_sym3(t, lam, v)
+    if (maxval(abs(lam - [2.0D0, -1.0D0, -1.0D0])) > 10*TOL) then
+        print *, "eigen_sym3: wrong eigenvalues for the rotated double root", lam
+        passed = .false.
+    end if
+end subroutine test_eigen_sym3
