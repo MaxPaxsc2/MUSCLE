@@ -28,6 +28,10 @@ subroutine test_cutting_plane_vonmises(passed)
     type(Elasticity_linear) :: elas
     real(real64) :: strain_pf
     logical :: error
+    type(ten_3D2Osym) :: expected_stress
+    real(real64), parameter :: TOL=1D-8
+    ! Radial-return reference for uniaxial strain exx=0.8, E=1000, nu=0.3, Swift(100, 0.1, 1e-4)
+    real(real64), parameter :: EXPECTED_STRAIN_PF=0.453258459032D0
 
     passed = .False.
     strain_pf = 0D0
@@ -54,7 +58,17 @@ subroutine test_cutting_plane_vonmises(passed)
     write(*,*) 
 
     write(*,*) "Error:", error
-    ! result = vm%stress_eq(to_test1)
-    ! passed = (abs(result - expected_result1) < EPS)
-    ! if (.not. passed) return
+
+    passed = .not. error
+    if (.not. passed) return
+
+    passed = abs(strain_pf - EXPECTED_STRAIN_PF) < TOL
+    if (.not. passed) print*, "Effective plastic strain is not equal", strain_pf - EXPECTED_STRAIN_PF
+    if (.not. passed) return
+
+    call expected_stress%init(xx=728.2627238217D0, yy=635.8686380891D0, zz=635.8686380891D0, &
+                              xy=0D0, yz=0D0, xz=0D0)
+    passed = stress%is_approx(expected_stress, tol=TOL)
+    if (.not. passed) print*, "Stress is not equal", stress - expected_stress
+    if (.not. passed) return
 end subroutine

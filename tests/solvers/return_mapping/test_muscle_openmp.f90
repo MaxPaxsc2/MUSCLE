@@ -157,7 +157,7 @@ subroutine test_openmp_closest_point_vm(passed)
     end do
 
     deallocate(strains, hist_seq, hist_par, tang_seq, tang_par)
-    passed = .FALSE.
+    passed = .TRUE.
     print*, "    ALLGOOD!"
 end subroutine test_openmp_closest_point_vm
 

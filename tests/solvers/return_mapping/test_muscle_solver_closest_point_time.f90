@@ -29,6 +29,7 @@ subroutine test_closest_point_time_vonmises_uniaxial_tensile(passed)
     implicit none
 
     real(real64), parameter :: EPS=1e-8
+    real(real64), parameter :: TOL_TEN=1D-6  ! input strain has 8 digits: |stress_yy| ~ 1e-7*|stress_xx|
     logical, intent(out) :: passed
     type(Closest_point_data) :: data
     type(Closest_point) :: solver
@@ -127,8 +128,9 @@ subroutine test_closest_point_time_vonmises_uniaxial_tensile(passed)
     error = .False.
     
 
-    call expected_stress%init(xx=90D0, yy=0D0, zz=0D0, xy=0D0, yz=0D0, xz=0D0)
-    expected_strain_effective = 0.3485784401D0
+    ! Uniaxial tension with JC: E*(exx - ep) = Swift(ep)*(1 + C*log(ep/dt/epdmax))
+    call expected_stress%init(xx=100.6464834098D0, yy=0D0, zz=0D0, xy=0D0, yz=0D0, xz=0D0)
+    expected_strain_effective = 0.3379319566D0
     call expected_strain_plastic%init(xx=expected_strain_effective,        &
                                       yy=-0.5D0*expected_strain_effective, &
                                       zz=-0.5D0*expected_strain_effective, &
@@ -154,7 +156,7 @@ subroutine test_closest_point_time_vonmises_uniaxial_tensile(passed)
                   iters=iters           &
                   )
 
-    passed = stress .approx. expected_stress
+    passed = stress%is_approx(expected_stress, tol=TOL_TEN)
     print*, "strain_pf", strain_pf, sw%stress(strain_pf), jc%flow_stress(strain_pf, strain_pf/1D+2)
     if (.not. passed) print*, "Case 6 Stress is no equal", new_line('A'),          &
                               "Expected:", expected_stress, new_line('A'),  &
@@ -169,7 +171,7 @@ subroutine test_closest_point_time_vonmises_uniaxial_tensile(passed)
                               "Difference", strain_pf - expected_strain_effective
     if (.not. passed) return
 
-    passed = strain_p .approx. expected_strain_plastic
+    passed = strain_p%is_approx(expected_strain_plastic, tol=TOL_TEN)
     if (.not. passed) print*, "Case 8 Plastic Strain is not equal", new_line('A'), &
                               "Expected:", expected_strain_plastic, new_line('A'), &
                               "Actual Value:", strain_p, new_line('A'),            & 
@@ -186,7 +188,7 @@ subroutine test_closest_point_time_vonmises_uniaxial_tensile(passed)
     call solver%tangent_numerical(strain=strain, data=data, tangent=numerical_tangent)
     call solver%tangent(strain=strain, data=data, tangent=tangent)
 
-    passed = tangent .approx. numerical_tangent
+    passed = tangent%is_approx(numerical_tangent, tol=1.0D-7)
     if (.not. passed) print*, "Case 10 Tangent is no equal", new_line('A'),          &
                               "Analitical:", tangent, new_line('A'),  &
                               "Numerical:", numerical_tangent, new_line('A'),       &
@@ -232,7 +234,8 @@ subroutine test_closest_point_time_non_converged(passed)
 
     ! data = Closest_point_data(strain_pf=strain_pf, strain_p=strain_p, dt=1.0D+2)
     call data%init(strain_pf=0D0, strain_p=strain_p, dt=1.0D+2)
-    call solver%init(elasticity=elas, hardening=jc, yield=vm, iter_nw=5)
+    ! Same state as the uniaxial case, which converges in 5 iterations
+    call solver%init(elasticity=elas, hardening=jc, yield=vm, iter_nw=4)
     call solver%solve(strain=strain, data=data)
     call data%get(status=status,        &
                   iters=iters           &
