@@ -132,8 +132,11 @@ subroutine test_CPB06_stresseq_anisotropic(passed)
     real(real64), dimension(3) :: eigs
     integer :: n_zero
 
-    ! 1. Ti-6Al-4V, CPB06 at initial yield (Tuninetti et al., Int. J. Plasticity
-    !    67, 2015, Table 3, Wp = 1.857 J/cm3). Criterion of Cazacu, Plunkett,
+    ! 1. Ti-6Al-4V, CPB06 at initial yield: coefficient magnitudes of the row
+    !    Wp = 1.857 J/cm3 (Tuninetti et al. 2013 preprint, Table 2, p. 6; also
+    !    Int. J. Plasticity 67, 2015, Table 3, p. 60) with the signs of the
+    !    original test, not the published ones (the published row is used in
+    !    test_CPB06_tracepower_reference). Criterion of Cazacu, Plunkett,
     !    Barlat, Int. J. Plasticity 22, 2006. a = 2, k /= 0 (SD effect).
     !    C is symmetric; C44 = C55 = C66.
     c11 = 1.000D0
@@ -500,8 +503,8 @@ end subroutine test_CPB06_isotropic_j2_full
 
 subroutine test_CPB06_tracepower_reference(passed)
     ! k = 0 and even a: stress_eq = B*tr(Sigma**a)**(1/a), smooth for any spectrum.
-    ! Anisotropic maps: Ti-6Al-4V (Tuninetti et al. 2013, Table 2, Wp = 1.857,
-    ! with k set to 0 for this check) and a non-symmetric synthetic C.
+    ! Anisotropic maps: Ti-6Al-4V (Tuninetti et al. 2013, Table 2, p. 6,
+    ! Wp = 1.857, with k set to 0 for this check) and a non-symmetric synthetic C.
     use, intrinsic :: iso_fortran_env
     use muscle_tensors
     use muscle_yield_cpb06
