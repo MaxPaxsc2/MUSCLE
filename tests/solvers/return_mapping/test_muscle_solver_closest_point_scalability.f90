@@ -163,5 +163,4 @@ program test_muscle_solver_closest_point_scalability
     print*, "========================================================================="
 
     deallocate(strains, hist_seq, hist_par)
-    stop 1
 end program test_muscle_solver_closest_point_scalability
