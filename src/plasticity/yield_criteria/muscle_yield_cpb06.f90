@@ -14,6 +14,9 @@ module muscle_yield_cpb06
       real(real64), dimension(3) :: C2
       real(real64) :: k
       real(real64) :: a
+      ! Normalization factor B (Cazacu et al., 2006). It depends only on C1, k and a,
+      ! so it is computed once in init instead of in every stress_eq call
+      real(real64) :: B
 
     contains
         procedure :: stress_eq
@@ -33,6 +36,9 @@ module muscle_yield_cpb06
         class(CPB06), intent(inout) :: self
         real(real64), intent(in) :: c11, c12, c13, c21, c22, c23, c31, c32, c33, c44, c55, c66
         real(real64), intent(in) :: k, a
+        ! Principal values of C1 : dev(sigma) for a unit uniaxial tension along x;
+        ! only used to compute B
+        real(real64), dimension(3):: gamma
 
         self%C1 = reshape(  &
                           [c11, c21, c31, &
@@ -43,6 +49,14 @@ module muscle_yield_cpb06
         self%C2 = [c44, c55, c66]
         self%k = k
         self%a = a
+
+        ! [PR note] Moved from stress_eq (unchanged): gamma and B depend only on C1, k and a,
+        ! so they are computed once here instead of in every stress_eq call.
+        gamma(1) = (2D0*self%C1(1,1) - self%C1(1,2) - self%C1(1,3))/3D0
+        gamma(2) = (2D0*self%C1(2,1) - self%C1(2,2) - self%C1(2,3))/3D0
+        gamma(3) = (2D0*self%C1(3,1) - self%C1(3,2) - self%C1(3,3))/3D0
+
+        self%B = sum((abs(gamma) - k*gamma)**a)**(-1D0/a)
 
     end subroutine init
 
@@ -62,8 +76,6 @@ module muscle_yield_cpb06
         real(real64), dimension(3) :: sigma_eig
 
         real(real64) :: sxx, syy, szz, sxy, syz, sxz
-        real(real64), dimension(3):: gamma
-        real(real64) :: b
 
         k = self%k
         a = self%a
@@ -81,13 +93,8 @@ module muscle_yield_cpb06
 
         res = sum((abs(sigma_eig) - k*sigma_eig)**a)**(1D0/a)
 
-        gamma(1) = (2D0*self%C1(1,1) - self%C1(1,2) - self%C1(1,3))/3D0
-        gamma(2) = (2D0*self%C1(2,1) - self%C1(2,2) - self%C1(2,3))/3D0
-        gamma(3) = (2D0*self%C1(3,1) - self%C1(3,2) - self%C1(3,3))/3D0
-
-        b = sum((abs(gamma) - k*gamma)**a)**(-1D0/a)
-
-        res = res*b
+        ! [PR note] gamma and b were computed here; B is now computed once in init.
+        res = res*self%B
 
     end function stress_eq
 
