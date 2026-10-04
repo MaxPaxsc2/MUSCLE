@@ -1,3 +1,4 @@
 add_muscle_test(muscle_math_operations test_muscle_math_operations.f90)
 add_muscle_test(muscle_math_derivatives test_muscle_math_derivatives.f90)
 add_muscle_test(muscle_math_spectral_derivs test_muscle_math_spectral_derivs.f90)
+add_muscle_test(muscle_math_spectral_functions test_muscle_math_spectral_functions.f90)
