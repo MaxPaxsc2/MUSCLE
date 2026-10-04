@@ -24,6 +24,9 @@ program test_muscle_yield_hill48
     ! call test_vonMises_stresseq_derivates2(passed)
     ! if (.not. passed) STOP 7
 
+    call test_Hill48_gradient(passed)
+    if (.not. passed) STOP 8
+
     print*, "Passed!", passed
     STOP 0
 end program test_muscle_yield_hill48
@@ -273,3 +276,54 @@ end subroutine
 
 ! end subroutine
 
+subroutine test_Hill48_gradient(passed)
+    ! Analytical gradient of Hill48 with the AA2090-T3 coefficients, obtained from the
+    ! r-values r0, r45, r90 (Yoon and Barlat, 2006) and normalized to the RD yield stress.
+    ! Checks: closed forms in uniaxial RD tension and pure xy shear, the finite-difference
+    ! gradient of the base class in a general state, and Euler's identity grad : stress = seq.
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_yield_hill48
+    implicit none
+
+    real(real64), parameter :: EPS = 1.0e-12_real64, EPS_FD = 1.0e-7_real64
+    logical, intent(out) :: passed
+
+    type(Hill48) :: h48
+    type(ten_3D2Osym) :: stress, grad, grad_fd, expected
+    real(real64) :: r0, r45, r90, f, g, h, n, seq
+
+    r0 = 0.2115D0
+    r45 = 1.5769D0
+    r90 = 0.6923D0
+    f = r0/(r90*(1D0 + r0))
+    g = 1D0/(1D0 + r0)
+    h = r0/(1D0 + r0)
+    n = (r0 + r90)*(1D0 + 2D0*r45)/(2D0*r90*(1D0 + r0))
+    h48 = Hill48(f=f, g=g, h=h, l=1.5D0, m=1.5D0, n=n)
+
+    ! Uniaxial tension in RD: grad = (g + h, -h, -g, 0, 0, 0)/sqrt(g + h)
+    call stress%init((/2D0, 0D0, 0D0, 0D0, 0D0, 0D0/))
+    grad = h48%dstressEq_dstress(stress)
+    call expected%init((/g + h, -h, -g, 0D0, 0D0, 0D0/)/sqrt(g + h))
+    passed = maxval(abs(grad%vals - expected%vals)) < EPS
+    if (.not. passed) print *, "Hill48 gradient, uniaxial RD:", grad%vals
+    if (.not. passed) return
+
+    ! Pure xy shear (tensorial): grad_xy = n*sxy/seq = sqrt(n/2)
+    call stress%init((/0D0, 0D0, 0D0, 3D0, 0D0, 0D0/))
+    grad = h48%dstressEq_dstress(stress)
+    call expected%init((/0D0, 0D0, 0D0, sqrt(0.5D0*n), 0D0, 0D0/))
+    passed = maxval(abs(grad%vals - expected%vals)) < EPS
+    if (.not. passed) print *, "Hill48 gradient, xy shear:", grad%vals
+    if (.not. passed) return
+
+    ! General state: finite differences of the base class and Euler's identity
+    call stress%init((/1.3D0, -0.4D0, 0.7D0, 0.5D0, -0.8D0, 0.2D0/))
+    grad = h48%dstressEq_dstress(stress)
+    grad_fd = h48%dstressEq_dstress_numeric(stress)
+    seq = h48%stress_eq(stress)
+    passed = maxval(abs(grad%vals - grad_fd%vals)) < EPS_FD .and. &
+             abs((grad .ddot. stress) - seq) < EPS*seq
+    if (.not. passed) print *, "Hill48 gradient, general state:", grad%vals, grad_fd%vals
+end subroutine test_Hill48_gradient

@@ -12,7 +12,8 @@ module muscle_yield_hill48
         real(real64) :: f,g,h,l,m,n
     contains
         procedure :: stress_eq
-        ! procedure :: dstressEq_dstress => dstressEq_dstress_hill48
+        ! [PR note] Binding enabled (it was commented out); the procedure is added below.
+        procedure :: dstressEq_dstress => dstressEq_dstress_hill48
         ! procedure :: ddstressEq_ddstress => ddstressEq_ddstress_hill48
     end type Hill48
 
@@ -35,6 +36,33 @@ module muscle_yield_hill48
 
 
     end function stress_eq
+
+    pure function dstressEq_dstress_hill48(self, stress) result(res)
+        ! Gradient of the Hill (1948) equivalent stress, d(seq)/d(stress) = (P : stress)/seq,
+        ! where seq**2 = stress : P : stress is the quadratic form of stress_eq.
+        ! Shear components are tensorial: the xy component is n*sxy/seq.
+        ! Called by the return-mapping solvers through dstressEq_dstress.
+        use muscle_tensors
+        implicit None
+        class(Hill48), intent(in) :: self
+        type(ten_3D2Osym), intent(in) :: stress
+        type(ten_3D2Osym) :: res
+
+        real(real64) :: sxx, syy, szz
+
+        sxx = stress%xx()
+        syy = stress%yy()
+        szz = stress%zz()
+
+        call res%init(xx=self%g*(sxx - szz) + self%h*(sxx - syy), &
+                      yy=self%f*(syy - szz) + self%h*(syy - sxx), &
+                      zz=self%f*(szz - syy) + self%g*(szz - sxx), &
+                      xy=self%n*stress%xy(),                       &
+                      yz=self%l*stress%yz(),                       &
+                      xz=self%m*stress%xz())
+        res = res/self%stress_eq(stress)
+
+    end function dstressEq_dstress_hill48
 
   !   pure function dstressEq_dstress_vm(self, stress) result(res)
   !     ! use muscle_math_operations
