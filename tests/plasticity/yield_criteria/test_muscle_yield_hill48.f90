@@ -27,6 +27,9 @@ program test_muscle_yield_hill48
     call test_Hill48_gradient(passed)
     if (.not. passed) STOP 8
 
+    call test_Hill48_hessian(passed)
+    if (.not. passed) STOP 9
+
     print*, "Passed!", passed
     STOP 0
 end program test_muscle_yield_hill48
@@ -327,3 +330,52 @@ subroutine test_Hill48_gradient(passed)
              abs((grad .ddot. stress) - seq) < EPS*seq
     if (.not. passed) print *, "Hill48 gradient, general state:", grad%vals, grad_fd%vals
 end subroutine test_Hill48_gradient
+
+subroutine test_Hill48_hessian(passed)
+    ! Analytical Hessian of Hill48 with the AA2090-T3 coefficients of test_Hill48_gradient.
+    ! Checks, in a general state: H : dS against central differences of the analytical
+    ! gradient along three directions, and the null directions of the Hessian:
+    ! H : stress = 0 (seq is homogeneous of degree one) and H : I = 0 (pressure insensitivity).
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_yield_hill48
+    implicit none
+
+    real(real64), parameter :: EPS = 1.0e-12_real64, EPS_FD = 1.0e-7_real64, STEP = 1.0e-5_real64
+    logical, intent(out) :: passed
+
+    type(Hill48) :: h48
+    type(ten_3D2Osym) :: stress, ds(3), fd, hds, iden, hdi
+    type(ten_3D4O3sym) :: hess
+    real(real64) :: r0, r45, r90
+    integer :: i
+
+    r0 = 0.2115D0
+    r45 = 1.5769D0
+    r90 = 0.6923D0
+    h48 = Hill48(f=r0/(r90*(1D0 + r0)), g=1D0/(1D0 + r0), h=r0/(1D0 + r0), &
+                 l=1.5D0, m=1.5D0, n=(r0 + r90)*(1D0 + 2D0*r45)/(2D0*r90*(1D0 + r0)))
+
+    call stress%init((/1.3D0, -0.4D0, 0.7D0, 0.5D0, -0.8D0, 0.2D0/))
+    hess = h48%ddstressEq_ddstress(stress)
+
+    ! Directions: one normal, one shear and one mixed
+    call ds(1)%init((/1D0, 0D0, 0D0, 0D0, 0D0, 0D0/))
+    call ds(2)%init((/0D0, 0D0, 0D0, 0D0, 1D0, 0D0/))
+    call ds(3)%init((/0.3D0, -0.7D0, 0.2D0, 0.6D0, 0.1D0, -0.4D0/))
+    passed = .true.
+    do i = 1, 3
+        fd = (h48%dstressEq_dstress(stress + STEP*ds(i)) - &
+              h48%dstressEq_dstress(stress - STEP*ds(i)))/(2D0*STEP)
+        hds = hess .ddot. ds(i)
+        passed = passed .and. maxval(abs(hds%vals - fd%vals)) < EPS_FD
+    end do
+    if (.not. passed) print *, "Hill48 Hessian differs from the differences of the gradient"
+    if (.not. passed) return
+
+    call iden%init((/1D0, 1D0, 1D0, 0D0, 0D0, 0D0/))
+    hds = hess .ddot. stress
+    hdi = hess .ddot. iden
+    passed = maxval(abs(hds%vals)) < EPS .and. maxval(abs(hdi%vals)) < EPS
+    if (.not. passed) print *, "Hill48 Hessian null directions:", hds%vals, hdi%vals
+end subroutine test_Hill48_hessian

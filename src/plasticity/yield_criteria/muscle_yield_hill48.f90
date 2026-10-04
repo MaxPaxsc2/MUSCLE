@@ -14,7 +14,8 @@ module muscle_yield_hill48
         procedure :: stress_eq
         ! [PR note] Binding enabled (it was commented out); the procedure is added below.
         procedure :: dstressEq_dstress => dstressEq_dstress_hill48
-        ! procedure :: ddstressEq_ddstress => ddstressEq_ddstress_hill48
+        ! [PR note] Binding enabled (it was commented out); the procedure is added below.
+        procedure :: ddstressEq_ddstress => ddstressEq_ddstress_hill48
     end type Hill48
 
     contains
@@ -63,6 +64,36 @@ module muscle_yield_hill48
         res = res/self%stress_eq(stress)
 
     end function dstressEq_dstress_hill48
+
+    pure function ddstressEq_ddstress_hill48(self, stress) result(res)
+        ! Hessian of the Hill (1948) equivalent stress, (P - grad (x) grad)/seq, where P is the
+        ! constant tensor of the quadratic form, seq**2 = stress : P : stress.
+        ! seq is recovered as grad : stress (seq is homogeneous of degree one), so the square
+        ! root is evaluated only once, inside dstressEq_dstress.
+        ! Called by the return-mapping solvers through ddstressEq_ddstress.
+        use muscle_tensors
+        implicit None
+        class(Hill48), intent(in) :: self
+        type(ten_3D2Osym), intent(in) :: stress
+        type(ten_3D4O3sym) :: res
+
+        type(ten_3D2Osym) :: grad
+        type(ten_3D4O3sym) :: p
+        real(real64) :: seq
+
+        grad = self%dstressEq_dstress(stress)
+        seq = grad .ddot. stress
+
+        ! Shear entries are n/2, l/2, m/2: the pairs (xy,xy), (xy,yx), (yx,xy) and (yx,yx)
+        ! give 4*p_xyxy*sxy**2, which must equal the term 2*n*sxy**2 of stress_eq.
+        call p%init(xxxx=self%g + self%h, yyyy=self%f + self%h, zzzz=self%f + self%g, &
+                    xyxy=0.5D0*self%n,    yzyz=0.5D0*self%l,    xzxz=0.5D0*self%m,    &
+                    xxyy=-self%h,         yyzz=-self%f,         xxzz=-self%g,         &
+                    zzxy=0D0, xyyz=0D0, yzxz=0D0, yyxy=0D0, zzyz=0D0, xyxz=0D0,       &
+                    xxxy=0D0, yyyz=0D0, zzxz=0D0, xxyz=0D0, yyxz=0D0, xxxz=0D0)
+        res = (p - (.tdotsym. grad))/seq
+
+    end function ddstressEq_ddstress_hill48
 
   !   pure function dstressEq_dstress_vm(self, stress) result(res)
   !     ! use muscle_math_operations
