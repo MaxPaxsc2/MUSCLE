@@ -14,7 +14,7 @@ module muscle_yield_cpb06
       real(real64), dimension(3) :: C2
       real(real64) :: k
       real(real64) :: a
-      ! Normalization factor B (Cazacu et al., 2006). It depends only on C1, k and a,
+      ! Normalization factor B (Cazacu et al., 2006, Eq. 12). It depends only on C1, k and a,
       ! so it is computed once in init instead of in every stress_eq call
       real(real64) :: B
 
@@ -50,8 +50,6 @@ module muscle_yield_cpb06
         self%k = k
         self%a = a
 
-        ! [PR note] Moved from stress_eq (unchanged): gamma and B depend only on C1, k and a,
-        ! so they are computed once here instead of in every stress_eq call.
         gamma(1) = (2D0*self%C1(1,1) - self%C1(1,2) - self%C1(1,3))/3D0
         gamma(2) = (2D0*self%C1(2,1) - self%C1(2,2) - self%C1(2,3))/3D0
         gamma(3) = (2D0*self%C1(3,1) - self%C1(3,2) - self%C1(3,3))/3D0
@@ -93,7 +91,6 @@ module muscle_yield_cpb06
 
         res = sum((abs(sigma_eig) - k*sigma_eig)**a)**(1D0/a)
 
-        ! [PR note] gamma and b were computed here; B is now computed once in init.
         res = res*self%B
 
     end function stress_eq
