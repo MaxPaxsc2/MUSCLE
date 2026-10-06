@@ -51,7 +51,8 @@ subroutine test_closest_point_cpb06_large_increment_1(passed)
     type(Plastic_material_history) :: history
     type(ten_3D2Osym) :: strain, strain_p, stress, flow, law, zero
     real(real64) :: sigma_y0, eps_y, strain_pf, d(6,6), lambdas(3)
-    real(real64) :: err_yield, err_elastic, err_flow, err_trace
+    real(real64) :: err_yield, err_flow, err_trace
+    logical :: elastic_ok
     integer :: i, j, status, iters
 
     passed = .False.
@@ -97,16 +98,16 @@ subroutine test_closest_point_cpb06_large_increment_1(passed)
 
             err_yield = abs(cpb%stress_eq(stress) - sw%stress(strain_pf))/sigma_y0
             law = elas%stress(strain - strain_p)
-            err_elastic = maxval(abs(stress%vals - law%vals))/maxval(abs(law%vals))
+            elastic_ok = stress%is_approx(law, tol=TOL_ELASTIC)
             flow = strain_p - strain_pf*cpb%dstressEq_dstress(stress)
             err_flow = sqrt(sum(flow%vals**2))
             err_trace = abs(strain_p%xx() + strain_p%yy() + strain_p%zz())/sqrt(sum(strain_p%vals**2))
 
-            passed = err_yield < TOL_YIELD .and. err_elastic < TOL_ELASTIC .and. &
+            passed = err_yield < TOL_YIELD .and. elastic_ok .and. &
                      err_flow < TOL_FLOW .and. err_trace < TOL_TRACE
             if (.not. passed) print*, "Converged state is not admissible, direction", j, &
                                       " lambda", lambdas(i), new_line('A'), &
-                                      "Yield:", err_yield, " Elastic:", err_elastic, new_line('A'), &
+                                      "Yield:", err_yield, " Elastic law:", elastic_ok, new_line('A'), &
                                       "Flow:", err_flow, " Trace:", err_trace
             if (.not. passed) return
         end do
