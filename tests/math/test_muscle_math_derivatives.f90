@@ -5,6 +5,7 @@ module test_muscle_math_derivatives_mod
     public :: fun_scalar_scalar_test1, fun_scalar_scalar_test2, fun_scalar_scalar_test3
     public :: fun_scalar_test1, fun_scalar_test2, fun_scalar_test3, energy_hooke
     public :: fun_tens_x, fun_tens_2x, fun_tens_tenx, fun_nonlinear_tens
+    public :: fun_scalar_normal_shear
     type, public :: mytype_test
         real(real64) :: a
         contains
@@ -164,6 +165,17 @@ contains
         trace = x%vals(1) + x%vals(2) + x%vals(3)
         res%vals = trace * x%vals
     end function
+
+    ! f(x) = tr(x) * (x_xy + x_yz + x_xz): its only second derivatives are the normal-shear ones
+    pure function fun_scalar_normal_shear(x) result(res)
+        use, intrinsic :: iso_fortran_env
+        use muscle_tensors, only : ten_3D2Osym
+        implicit none
+        type(ten_3D2Osym), intent(in) :: x
+        real(real64) :: res
+
+        res = (x%vals(1) + x%vals(2) + x%vals(3))*(x%vals(4) + x%vals(5) + x%vals(6))
+    end function
 end module test_muscle_math_derivatives_mod
 
 
@@ -188,6 +200,9 @@ program test_muscle_math_derivatives
 
     call test_derivate2O_scalar_ten(passed)
     if (.not. passed) STOP 5
+
+    call test_derivate2O_normal_shear(passed)
+    if (.not. passed) STOP 6
 
     STOP 0
 end program test_muscle_math_derivatives
@@ -532,4 +547,42 @@ subroutine test_derivate2O_scalar_ten(passed)
                               expected%vals(:), new_line('A')
                              
     if (.not. passed) return
+end subroutine
+
+
+subroutine test_derivate2O_normal_shear(passed)
+    ! Second derivative of f(x) = tr(x) * (x_xy + x_yz + x_xz) in a state with all components
+    ! non-zero. With tensorial shears, d2f/dx_ii dx_jk = 1/2 for each normal ii and shear jk (the
+    ! stored shear is shared by x_jk and x_kj); every other entry is zero. These nine
+    ! normal-shear entries are the ones that are zero in the cases above.
+    use, intrinsic :: iso_fortran_env
+    use muscle_math_derivatives
+    use muscle_tensors
+    use test_muscle_math_derivatives_mod
+    implicit none
+
+    logical, intent(out) :: passed
+
+    type(ten_3D2Osym) :: to_test
+    type(ten_3D4O3sym) :: expected, result
+
+    call to_test%init(vals=(/1.3D0, -0.4D0, 0.7D0, 0.5D0, -0.8D0, 0.2D0/))
+    call expected%init(xxxx=0D0,   yyyy=0D0,   zzzz=0D0,   &
+                       xyxy=0D0,   yzyz=0D0,   xzxz=0D0,   &
+                       xxyy=0D0,   yyzz=0D0,               &
+                       zzxy=0.5D0, xyyz=0D0,   yzxz=0D0,   &
+                       xxzz=0D0,                           &
+                       yyxy=0.5D0, zzyz=0.5D0, xyxz=0D0,   &
+                       xxxy=0.5D0, yyyz=0.5D0, zzxz=0.5D0, &
+                       xxyz=0.5D0, yyxz=0.5D0, xxxz=0.5D0  &
+                       )
+    result = derivative2O(fun_scalar_normal_shear, to_test)
+
+    passed = expected%is_approx(result, tol=1.0D-8)
+    if (.not. passed) print*, "Case 3 second derivative",  new_line('A'), &
+                              "The normal-shear entries differ from the analytical ones", new_line('A'), &
+                              "The values obtained are:", new_line('A'),  &
+                              result%vals(:), new_line('A'), &
+                              "The expected are:", new_line('A'), &
+                              expected%vals(:), new_line('A')
 end subroutine

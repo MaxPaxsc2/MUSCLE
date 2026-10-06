@@ -315,10 +315,10 @@ module muscle_math_derivatives
         !! (11, 22, 33, 44, 55, 66, 12, 23, 34, 45, 56, 13, 24, 35, 46, 14, 25, 36, 15, 26, 16)
         res%vals(1)=a%vals(1,1)  ; res%vals(2)=a%vals(2,2)  ; res%vals(3)=a%vals(3,3)  ; res%vals(4)=a%vals(4,4)  
         res%vals(5)=a%vals(5,5)  ; res%vals(6)=a%vals(6,6)  ; res%vals(7)=a%vals(1,2)  ; res%vals(8)=a%vals(2,3)  
-        res%vals(9)=a%vals(3,4)  ; res%vals(10)=a%vals(4,5) ; res%vals(11)=a%vals(5,6) ; res%vals(12)=a%vals(1,3)
-        res%vals(13)=a%vals(2,4) ; res%vals(14)=a%vals(3,5) ; res%vals(15)=a%vals(4,6) ; res%vals(16)=a%vals(1,4) 
-        res%vals(17)=a%vals(2,5) ; res%vals(18)=a%vals(3,6) ; res%vals(19)=a%vals(1,5) ; res%vals(20)=a%vals(2,6) 
-        res%vals(21)=a%vals(1,6)
+        res%vals(9)=a%vals(4,3)  ; res%vals(10)=a%vals(4,5) ; res%vals(11)=a%vals(5,6) ; res%vals(12)=a%vals(1,3)
+        res%vals(13)=a%vals(4,2) ; res%vals(14)=a%vals(5,3) ; res%vals(15)=a%vals(4,6) ; res%vals(16)=a%vals(4,1) 
+        res%vals(17)=a%vals(5,2) ; res%vals(18)=a%vals(6,3) ; res%vals(19)=a%vals(5,1) ; res%vals(20)=a%vals(6,2) 
+        res%vals(21)=a%vals(6,1)
         return
     end function derivative2O_scalar_3D2Osym
     
