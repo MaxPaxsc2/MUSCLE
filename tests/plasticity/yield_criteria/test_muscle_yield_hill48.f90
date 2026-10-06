@@ -3,7 +3,7 @@ program test_muscle_yield_hill48
     
     logical :: passed
 
-    call test_vonMises_stresseq_hydrostatic(passed)
+    call test_Hill48_stresseq_hydrostatic(passed)
     if (.not. passed) STOP 1
 
     ! call test_vonMises_stresseq_simple_tensile(passed)
@@ -34,7 +34,7 @@ program test_muscle_yield_hill48
     STOP 0
 end program test_muscle_yield_hill48
 
-subroutine test_vonMises_stresseq_hydrostatic(passed)
+subroutine test_Hill48_stresseq_hydrostatic(passed)
     use, intrinsic :: iso_fortran_env
     use muscle_tensors
     use muscle_yield_hill48
@@ -309,7 +309,7 @@ subroutine test_Hill48_gradient(passed)
     call stress%init((/2D0, 0D0, 0D0, 0D0, 0D0, 0D0/))
     grad = h48%dstressEq_dstress(stress)
     call expected%init((/g + h, -h, -g, 0D0, 0D0, 0D0/)/sqrt(g + h))
-    passed = maxval(abs(grad%vals - expected%vals)) < EPS
+    passed = grad%is_approx(expected, tol=EPS)
     if (.not. passed) print *, "Hill48 gradient, uniaxial RD:", grad%vals
     if (.not. passed) return
 
@@ -317,7 +317,7 @@ subroutine test_Hill48_gradient(passed)
     call stress%init((/0D0, 0D0, 0D0, 3D0, 0D0, 0D0/))
     grad = h48%dstressEq_dstress(stress)
     call expected%init((/0D0, 0D0, 0D0, sqrt(0.5D0*n), 0D0, 0D0/))
-    passed = maxval(abs(grad%vals - expected%vals)) < EPS
+    passed = grad%is_approx(expected, tol=EPS)
     if (.not. passed) print *, "Hill48 gradient, xy shear:", grad%vals
     if (.not. passed) return
 
@@ -326,7 +326,7 @@ subroutine test_Hill48_gradient(passed)
     grad = h48%dstressEq_dstress(stress)
     grad_fd = h48%dstressEq_dstress_numeric(stress)
     seq = h48%stress_eq(stress)
-    passed = maxval(abs(grad%vals - grad_fd%vals)) < EPS_FD .and. &
+    passed = grad%is_approx(grad_fd, tol=EPS_FD) .and. &
              abs((grad .ddot. stress) - seq) < EPS*seq
     if (.not. passed) print *, "Hill48 gradient, general state:", grad%vals, grad_fd%vals
 end subroutine test_Hill48_gradient
