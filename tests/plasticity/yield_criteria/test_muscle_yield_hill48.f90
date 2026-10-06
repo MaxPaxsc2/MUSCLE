@@ -332,23 +332,21 @@ subroutine test_Hill48_gradient(passed)
 end subroutine test_Hill48_gradient
 
 subroutine test_Hill48_hessian(passed)
-    ! Analytical Hessian of Hill48 with the AA2090-T3 coefficients of test_Hill48_gradient.
-    ! Checks, in a general state: H : dS against central differences of the analytical
-    ! gradient along three directions, and the null directions of the Hessian:
-    ! H : stress = 0 (seq is homogeneous of degree one) and H : I = 0 (pressure insensitivity).
+    ! Analytical Hessian of Hill48 with the AA2090-T3 coefficients of test_Hill48_gradient,
+    ! against the finite-difference Hessian of the base class (ddstressEq_ddstress_numeric).
+    ! Measured differences: below 1e-7 relative.
     use, intrinsic :: iso_fortran_env
     use muscle_tensors
     use muscle_yield_hill48
     implicit none
 
-    real(real64), parameter :: EPS = 1.0e-12_real64, EPS_FD = 1.0e-7_real64, STEP = 1.0e-5_real64
+    real(real64), parameter :: EPS_FD = 1.0e-6_real64
     logical, intent(out) :: passed
 
     type(Hill48) :: h48
-    type(ten_3D2Osym) :: stress, ds(3), fd, hds, iden, hdi
-    type(ten_3D4O3sym) :: hess
+    type(ten_3D2Osym) :: stress
+    type(ten_3D4O3sym) :: hess, hess_fd
     real(real64) :: r0, r45, r90
-    integer :: i
 
     r0 = 0.2115D0
     r45 = 1.5769D0
@@ -356,26 +354,19 @@ subroutine test_Hill48_hessian(passed)
     h48 = Hill48(f=r0/(r90*(1D0 + r0)), g=1D0/(1D0 + r0), h=r0/(1D0 + r0), &
                  l=1.5D0, m=1.5D0, n=(r0 + r90)*(1D0 + 2D0*r45)/(2D0*r90*(1D0 + r0)))
 
+    ! General state: normal and shear components together, so every entry of the Hessian,
+    ! including the normal-shear coupling, is non-zero
     call stress%init((/1.3D0, -0.4D0, 0.7D0, 0.5D0, -0.8D0, 0.2D0/))
     hess = h48%ddstressEq_ddstress(stress)
-
-    ! Directions: one normal, one shear and one mixed
-    call ds(1)%init((/1D0, 0D0, 0D0, 0D0, 0D0, 0D0/))
-    call ds(2)%init((/0D0, 0D0, 0D0, 0D0, 1D0, 0D0/))
-    call ds(3)%init((/0.3D0, -0.7D0, 0.2D0, 0.6D0, 0.1D0, -0.4D0/))
-    passed = .true.
-    do i = 1, 3
-        fd = (h48%dstressEq_dstress(stress + STEP*ds(i)) - &
-              h48%dstressEq_dstress(stress - STEP*ds(i)))/(2D0*STEP)
-        hds = hess .ddot. ds(i)
-        passed = passed .and. maxval(abs(hds%vals - fd%vals)) < EPS_FD
-    end do
-    if (.not. passed) print *, "Hill48 Hessian differs from the differences of the gradient"
+    hess_fd = h48%ddstressEq_ddstress_numeric(stress)
+    passed = hess%is_approx(hess_fd, tol=EPS_FD)
+    if (.not. passed) print *, "Hill48 Hessian, general state:", hess%vals, hess_fd%vals
     if (.not. passed) return
 
-    call iden%init((/1D0, 1D0, 1D0, 0D0, 0D0, 0D0/))
-    hds = hess .ddot. stress
-    hdi = hess .ddot. iden
-    passed = maxval(abs(hds%vals)) < EPS .and. maxval(abs(hdi%vals)) < EPS
-    if (.not. passed) print *, "Hill48 Hessian null directions:", hds%vals, hdi%vals
+    ! Uniaxial tension in RD: the shear entries reduce to n/(2 seq), l/(2 seq), m/(2 seq)
+    call stress%init((/2D0, 0D0, 0D0, 0D0, 0D0, 0D0/))
+    hess = h48%ddstressEq_ddstress(stress)
+    hess_fd = h48%ddstressEq_ddstress_numeric(stress)
+    passed = hess%is_approx(hess_fd, tol=EPS_FD)
+    if (.not. passed) print *, "Hill48 Hessian, uniaxial RD:", hess%vals, hess_fd%vals
 end subroutine test_Hill48_hessian

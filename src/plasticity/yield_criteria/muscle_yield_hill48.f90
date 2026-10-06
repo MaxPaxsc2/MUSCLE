@@ -13,7 +13,6 @@ module muscle_yield_hill48
     contains
         procedure :: stress_eq
         procedure :: dstressEq_dstress => dstressEq_dstress_hill48
-        ! [PR note] Binding enabled (it was commented out); the procedure is added below.
         procedure :: ddstressEq_ddstress => ddstressEq_ddstress_hill48
     end type Hill48
 
@@ -65,10 +64,8 @@ module muscle_yield_hill48
     end function dstressEq_dstress_hill48
 
     pure function ddstressEq_ddstress_hill48(self, stress) result(res)
-        ! Hessian of the Hill (1948) equivalent stress, (P - grad (x) grad)/seq, where P is the
-        ! constant tensor of the quadratic form, seq**2 = stress : P : stress.
-        ! seq is recovered as grad : stress (seq is homogeneous of degree one), so the square
-        ! root is evaluated only once, inside dstressEq_dstress.
+        ! Hessian of the Hill (1948, Eq. 5) equivalent stress, (P - grad (x) grad)/seq, where
+        ! P is the constant tensor of the quadratic form, seq**2 = stress : P : stress.
         ! Called by the return-mapping solvers through ddstressEq_ddstress.
         use muscle_tensors
         implicit None
@@ -81,7 +78,7 @@ module muscle_yield_hill48
         real(real64) :: seq
 
         grad = self%dstressEq_dstress(stress)
-        seq = grad .ddot. stress
+        seq = self%stress_eq(stress)
 
         ! Shear entries are n/2, l/2, m/2: the pairs (xy,xy), (xy,yx), (yx,xy) and (yx,yx)
         ! give 4*p_xyxy*sxy**2, which must equal the term 2*n*sxy**2 of stress_eq.
