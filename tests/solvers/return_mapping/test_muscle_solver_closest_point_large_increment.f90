@@ -36,7 +36,7 @@ subroutine test_closest_point_cpb06_large_increment_1(passed)
 
     real(real64), parameter :: YOUNG = 70000D0, POISSON = 0.33D0
     real(real64), parameter :: SW_K = 500D0, SW_N = 0.2D0, SW_E0 = 0.01D0
-    ! Flow residual accepted by Closest_point%iter (absolute, Euclidean norm of vals)
+    ! Flow tolerance of Closest_point%iter, here relative to the largest component (is_approx)
     real(real64), parameter :: TOL_FLOW = 1D-5
     real(real64), parameter :: TOL_YIELD = 1D-6
     real(real64), parameter :: TOL_ELASTIC = 1D-10
@@ -51,8 +51,8 @@ subroutine test_closest_point_cpb06_large_increment_1(passed)
     type(Plastic_material_history) :: history
     type(ten_3D2Osym) :: strain, strain_p, stress, flow, law, zero
     real(real64) :: sigma_y0, eps_y, strain_pf, d(6,6), lambdas(3)
-    real(real64) :: err_yield, err_flow, err_trace
-    logical :: elastic_ok
+    real(real64) :: err_yield, err_trace
+    logical :: elastic_ok, flow_ok
     integer :: i, j, status, iters
 
     passed = .False.
@@ -99,16 +99,16 @@ subroutine test_closest_point_cpb06_large_increment_1(passed)
             err_yield = abs(cpb%stress_eq(stress) - sw%stress(strain_pf))/sigma_y0
             law = elas%stress(strain - strain_p)
             elastic_ok = stress%is_approx(law, tol=TOL_ELASTIC)
-            flow = strain_p - strain_pf*cpb%dstressEq_dstress(stress)
-            err_flow = sqrt(sum(flow%vals**2))
-            err_trace = abs(strain_p%xx() + strain_p%yy() + strain_p%zz())/sqrt(sum(strain_p%vals**2))
+            flow = strain_pf*cpb%dstressEq_dstress(stress)
+            flow_ok = strain_p%is_approx(flow, tol=TOL_FLOW)
+            err_trace = abs(strain_p%xx() + strain_p%yy() + strain_p%zz())/strain_p%norm()
 
             passed = err_yield < TOL_YIELD .and. elastic_ok .and. &
-                     err_flow < TOL_FLOW .and. err_trace < TOL_TRACE
+                     flow_ok .and. err_trace < TOL_TRACE
             if (.not. passed) print*, "Converged state is not admissible, direction", j, &
                                       " lambda", lambdas(i), new_line('A'), &
                                       "Yield:", err_yield, " Elastic law:", elastic_ok, new_line('A'), &
-                                      "Flow:", err_flow, " Trace:", err_trace
+                                      "Flow:", flow_ok, " Trace:", err_trace
             if (.not. passed) return
         end do
     end do
