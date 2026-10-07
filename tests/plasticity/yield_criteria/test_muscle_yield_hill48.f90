@@ -333,19 +333,22 @@ end subroutine test_Hill48_gradient
 
 subroutine test_Hill48_hessian(passed)
     ! Analytical Hessian of Hill48 with the AA2090-T3 coefficients of test_Hill48_gradient,
-    ! against the finite-difference Hessian of the base class (ddstressEq_ddstress_numeric).
-    ! Measured differences: below 1e-7 relative.
+    ! against the finite-difference Hessian of the base class (ddstressEq_ddstress_numeric),
+    ! and of the isotropic Hill48 against the analytical Hessian of VonMises.
+    ! Measured differences: below 1e-7 relative against finite differences.
     use, intrinsic :: iso_fortran_env
     use muscle_tensors
     use muscle_yield_hill48
+    use muscle_yield_vonmises
     implicit none
 
-    real(real64), parameter :: EPS_FD = 1.0e-6_real64
+    real(real64), parameter :: EPS = 1.0e-12_real64, EPS_FD = 1.0e-6_real64
     logical, intent(out) :: passed
 
     type(Hill48) :: h48
+    type(VonMises) :: vm
     type(ten_3D2Osym) :: stress
-    type(ten_3D4O3sym) :: hess, hess_fd
+    type(ten_3D4O3sym) :: hess, hess_fd, hess_vm
     real(real64) :: r0, r45, r90
 
     r0 = 0.2115D0
@@ -369,4 +372,15 @@ subroutine test_Hill48_hessian(passed)
     hess_fd = h48%ddstressEq_ddstress_numeric(stress)
     passed = hess%is_approx(hess_fd, tol=EPS_FD)
     if (.not. passed) print *, "Hill48 Hessian, uniaxial RD:", hess%vals, hess_fd%vals
+    if (.not. passed) return
+
+    ! Isotropic limit: with f = g = h = 1/2 and l = m = n = 3/2, Hill48 is von Mises, so in a
+    ! general state its Hessian equals the analytical one of VonMises, independent of finite
+    ! differences
+    h48 = Hill48(f=0.5D0, g=0.5D0, h=0.5D0, l=1.5D0, m=1.5D0, n=1.5D0)
+    call stress%init((/1.3D0, -0.4D0, 0.7D0, 0.5D0, -0.8D0, 0.2D0/))
+    hess = h48%ddstressEq_ddstress(stress)
+    hess_vm = vm%ddstressEq_ddstress(stress)
+    passed = hess%is_approx(hess_vm, tol=EPS)
+    if (.not. passed) print *, "Hill48 Hessian, isotropic limit:", hess%vals, hess_vm%vals
 end subroutine test_Hill48_hessian
