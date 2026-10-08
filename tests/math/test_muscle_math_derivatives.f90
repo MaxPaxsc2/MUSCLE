@@ -166,7 +166,8 @@ contains
         res%vals = trace * x%vals
     end function
 
-    ! f(x) = tr(x) * (x_xy + x_yz + x_xz): its only second derivatives are the normal-shear ones
+    ! f(x) = (x_xx + 2 x_yy + 3 x_zz) * (5 x_xy + 7 x_yz + 11 x_xz): its only second derivatives
+    ! are the normal-shear ones
     pure function fun_scalar_normal_shear(x) result(res)
         use, intrinsic :: iso_fortran_env
         use muscle_tensors, only : ten_3D2Osym
@@ -174,7 +175,8 @@ contains
         type(ten_3D2Osym), intent(in) :: x
         real(real64) :: res
 
-        res = (x%vals(1) + x%vals(2) + x%vals(3))*(x%vals(4) + x%vals(5) + x%vals(6))
+        res = (x%vals(1) + 2D0*x%vals(2) + 3D0*x%vals(3)) &
+              *(5D0*x%vals(4) + 7D0*x%vals(5) + 11D0*x%vals(6))
     end function
 end module test_muscle_math_derivatives_mod
 
@@ -551,10 +553,11 @@ end subroutine
 
 
 subroutine test_derivate2O_normal_shear(passed)
-    ! Second derivative of f(x) = tr(x) * (x_xy + x_yz + x_xz) in a state with all components
-    ! non-zero. With tensorial shears, d2f/dx_ii dx_jk = 1/2 for each normal ii and shear jk (the
-    ! stored shear is shared by x_jk and x_kj); every other entry is zero. These nine
-    ! normal-shear entries are the ones that are zero in the cases above.
+    ! Second derivative of f(x) = (x_xx + 2 x_yy + 3 x_zz) * (5 x_xy + 7 x_yz + 11 x_xz) in a state
+    ! with all components non-zero. With tensorial shears, d2f/dx_ii dx_jk is half the product of
+    ! the weights of x_ii and x_jk (the stored shear is shared by x_jk and x_kj); every other entry
+    ! is zero. These nine normal-shear entries are the ones that are zero in the cases above, and
+    ! their weights are all different, so two entries stored in each other's place do not pass.
     use, intrinsic :: iso_fortran_env
     use muscle_math_derivatives
     use muscle_tensors
@@ -567,14 +570,14 @@ subroutine test_derivate2O_normal_shear(passed)
     type(ten_3D4O3sym) :: expected, result
 
     call to_test%init(vals=(/1.3D0, -0.4D0, 0.7D0, 0.5D0, -0.8D0, 0.2D0/))
-    call expected%init(xxxx=0D0,   yyyy=0D0,   zzzz=0D0,   &
-                       xyxy=0D0,   yzyz=0D0,   xzxz=0D0,   &
-                       xxyy=0D0,   yyzz=0D0,               &
-                       zzxy=0.5D0, xyyz=0D0,   yzxz=0D0,   &
-                       xxzz=0D0,                           &
-                       yyxy=0.5D0, zzyz=0.5D0, xyxz=0D0,   &
-                       xxxy=0.5D0, yyyz=0.5D0, zzxz=0.5D0, &
-                       xxyz=0.5D0, yyxz=0.5D0, xxxz=0.5D0  &
+    call expected%init(xxxx=0D0,   yyyy=0D0,    zzzz=0D0,    &
+                       xyxy=0D0,   yzyz=0D0,    xzxz=0D0,    &
+                       xxyy=0D0,   yyzz=0D0,                 &
+                       zzxy=7.5D0, xyyz=0D0,    yzxz=0D0,    &
+                       xxzz=0D0,                             &
+                       yyxy=5D0,   zzyz=10.5D0, xyxz=0D0,    &
+                       xxxy=2.5D0, yyyz=7D0,    zzxz=16.5D0, &
+                       xxyz=3.5D0, yyxz=11D0,   xxxz=5.5D0   &
                        )
     result = derivative2O(fun_scalar_normal_shear, to_test)
 
