@@ -101,7 +101,7 @@ subroutine test_closest_point_cpb06_large_increment_1(passed)
             elastic_ok = stress%is_approx(law, tol=TOL_ELASTIC)
             flow = strain_pf*cpb%dstressEq_dstress(stress)
             flow_ok = strain_p%is_approx(flow, tol=TOL_FLOW)
-            err_trace = abs(strain_p%xx() + strain_p%yy() + strain_p%zz())/strain_p%norm()
+            err_trace = abs(strain_p .ddot. iden_2O())/sqrt(strain_p .ddot. strain_p)
 
             passed = err_yield < TOL_YIELD .and. elastic_ok .and. &
                      flow_ok .and. err_trace < TOL_TRACE
