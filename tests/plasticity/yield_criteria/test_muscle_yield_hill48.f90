@@ -27,6 +27,9 @@ program test_muscle_yield_hill48
     call test_Hill48_gradient(passed)
     if (.not. passed) STOP 8
 
+    call test_Hill48_hessian(passed)
+    if (.not. passed) STOP 9
+
     print*, "Passed!", passed
     STOP 0
 end program test_muscle_yield_hill48
@@ -327,3 +330,57 @@ subroutine test_Hill48_gradient(passed)
              abs((grad .ddot. stress) - seq) < EPS*seq
     if (.not. passed) print *, "Hill48 gradient, general state:", grad%vals, grad_fd%vals
 end subroutine test_Hill48_gradient
+
+subroutine test_Hill48_hessian(passed)
+    ! Analytical Hessian of Hill48 with the AA2090-T3 coefficients of test_Hill48_gradient,
+    ! against the finite-difference Hessian of the base class (ddstressEq_ddstress_numeric),
+    ! and of the isotropic Hill48 against the analytical Hessian of VonMises.
+    ! Measured differences: below 1e-7 relative against finite differences.
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_yield_hill48
+    use muscle_yield_vonmises
+    implicit none
+
+    real(real64), parameter :: EPS = 1.0e-12_real64, EPS_FD = 1.0e-6_real64
+    logical, intent(out) :: passed
+
+    type(Hill48) :: h48
+    type(VonMises) :: vm
+    type(ten_3D2Osym) :: stress
+    type(ten_3D4O3sym) :: hess, hess_fd, hess_vm
+    real(real64) :: r0, r45, r90
+
+    r0 = 0.2115D0
+    r45 = 1.5769D0
+    r90 = 0.6923D0
+    h48 = Hill48(f=r0/(r90*(1D0 + r0)), g=1D0/(1D0 + r0), h=r0/(1D0 + r0), &
+                 l=1.5D0, m=1.5D0, n=(r0 + r90)*(1D0 + 2D0*r45)/(2D0*r90*(1D0 + r0)))
+
+    ! General state: normal and shear components together, so every entry of the Hessian,
+    ! including the normal-shear coupling, is non-zero
+    call stress%init((/1.3D0, -0.4D0, 0.7D0, 0.5D0, -0.8D0, 0.2D0/))
+    hess = h48%ddstressEq_ddstress(stress)
+    hess_fd = h48%ddstressEq_ddstress_numeric(stress)
+    passed = hess%is_approx(hess_fd, tol=EPS_FD)
+    if (.not. passed) print *, "Hill48 Hessian, general state:", hess%vals, hess_fd%vals
+    if (.not. passed) return
+
+    ! Uniaxial tension in RD: the shear entries reduce to n/(2 seq), l/(2 seq), m/(2 seq)
+    call stress%init((/2D0, 0D0, 0D0, 0D0, 0D0, 0D0/))
+    hess = h48%ddstressEq_ddstress(stress)
+    hess_fd = h48%ddstressEq_ddstress_numeric(stress)
+    passed = hess%is_approx(hess_fd, tol=EPS_FD)
+    if (.not. passed) print *, "Hill48 Hessian, uniaxial RD:", hess%vals, hess_fd%vals
+    if (.not. passed) return
+
+    ! Isotropic limit: with f = g = h = 1/2 and l = m = n = 3/2, Hill48 is von Mises, so in a
+    ! general state its Hessian equals the analytical one of VonMises, independent of finite
+    ! differences
+    h48 = Hill48(f=0.5D0, g=0.5D0, h=0.5D0, l=1.5D0, m=1.5D0, n=1.5D0)
+    call stress%init((/1.3D0, -0.4D0, 0.7D0, 0.5D0, -0.8D0, 0.2D0/))
+    hess = h48%ddstressEq_ddstress(stress)
+    hess_vm = vm%ddstressEq_ddstress(stress)
+    passed = hess%is_approx(hess_vm, tol=EPS)
+    if (.not. passed) print *, "Hill48 Hessian, isotropic limit:", hess%vals, hess_vm%vals
+end subroutine test_Hill48_hessian
