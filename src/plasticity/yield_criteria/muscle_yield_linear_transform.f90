@@ -53,7 +53,7 @@ contains
         !! S = L : stress = C : dev(stress) (Barlat et al., 2005, Eq. 11; Cazacu et al., 2006,
         !! Eq. 8): the 3x3 block L acts on the normal components and each factor of c_shear on
         !! its tensorial shear (xy, yz, xz). Called by the Yld2004-18p equivalent stress and by
-        !! the CPB06 derivatives.
+        !! the CPB06 and Yld2004-18p derivatives.
         real(real64), intent(in) :: L(3,3)            !! Normal block, from deviatoric_block
         real(real64), intent(in) :: c_shear(3)        !! Shear factors on (xy, yz, xz)
         type(ten_3D2Osym), intent(in) :: stress
@@ -76,7 +76,8 @@ contains
     pure function pull_back(L, c_shear, x) result(res)
         !! L^T : x, the adjoint of linear_transform: by the chain rule through S = L : stress
         !! (Barlat et al., 2005, Eq. 11; Cazacu et al., 2006, Eq. 8) it takes a derivative with
-        !! respect to S to one with respect to the stress. Called by the CPB06 gradient.
+        !! respect to S to one with respect to the stress. Called by the CPB06 and Yld2004-18p
+        !! gradients.
         real(real64), intent(in) :: L(3,3)            !! Normal block, from deviatoric_block
         real(real64), intent(in) :: c_shear(3)        !! Shear factors on (xy, yz, xz)
         type(ten_3D2Osym), intent(in) :: x
