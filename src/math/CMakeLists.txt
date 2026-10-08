@@ -4,5 +4,4 @@ target_sources(muscle PRIVATE
                  muscle_math_inverses.f90
                  muscle_math_linsolvers.f90
                  muscle_math_spectral_derivs.f90
-                 muscle_math_spectral_functions.f90
                  )
