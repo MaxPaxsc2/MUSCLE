@@ -12,6 +12,9 @@ program test_muscle_yield_linear_transform
     call test_linear_transform_pull_back_3(passed)
     if (.not. passed) STOP 3
 
+    call test_linear_transform_hessian_4(passed)
+    if (.not. passed) STOP 4
+
     print*, "Passed!", passed
     STOP 0
 end program test_muscle_yield_linear_transform
@@ -121,3 +124,36 @@ subroutine test_linear_transform_pull_back_3(passed)
     passed = abs(lhs - rhs) < TOL*abs(rhs)
     if (.not. passed) print*, "Pull back adjoint failed:", lhs, rhs
 end subroutine test_linear_transform_pull_back_3
+
+subroutine test_linear_transform_hessian_4(passed)
+    ! (L^T : H : L) : y = L^T : (H : (L : y)) for the six unit tensors y of the Voigt basis,
+    ! with H having its 21 components different and nonzero: each y checks one column, so
+    ! every normal, normal-shear and shear component of the result is checked
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_yield_linear_transform
+    implicit none
+    logical, intent(out) :: passed
+
+    real(real64), parameter :: TOL = 1.0D-14
+    real(real64) :: C(3,3), c_shear(3), L(3,3)
+    type(ten_3D2Osym) :: stress, y, hy, hy_ref
+    type(ten_3D4O3sym) :: H
+    integer :: i
+
+    call linear_transform_test_data(C, c_shear, stress)
+    L = deviatoric_block(C)
+    call H%init((/2.1D0, 1.7D0, 2.6D0, 0.9D0, 1.3D0, 0.7D0, -0.4D0, 0.35D0, 0.12D0, -0.22D0, &
+                  0.18D0, -0.6D0, -0.27D0, 0.41D0, 0.08D0, 0.33D0, -0.15D0, 0.5D0, -0.38D0, &
+                  0.24D0, -0.11D0/))
+    do i = 1, 6
+        y%vals = 0.0D0
+        y%vals(i) = 1.0D0
+        hy = pull_back_hessian(L, c_shear, H) .ddot. y
+        hy_ref = pull_back(L, c_shear, H .ddot. linear_transform(L, c_shear, y))
+        passed = hy%is_approx(hy_ref, tol=TOL)
+        if (.not. passed) print*, "Pull back of the Hessian failed, direction", i, &
+                                  hy%vals, hy_ref%vals
+        if (.not. passed) return
+    end do
+end subroutine test_linear_transform_hessian_4

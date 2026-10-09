@@ -5,7 +5,8 @@ module muscle_yield_cpb06
     use, intrinsic :: iso_fortran_env
     use muscle_tensors
     use muscle_yield_base
-    use muscle_yield_linear_transform, only : deviatoric_block, linear_transform, pull_back
+    use muscle_yield_linear_transform, only : deviatoric_block, linear_transform, pull_back, &
+                                             pull_back_hessian
     implicit none
     PRIVATE
 
@@ -26,6 +27,7 @@ module muscle_yield_cpb06
         procedure :: stress_eq
         procedure :: init
         procedure :: dstressEq_dstress => dstressEq_dstress_cpb06
+        procedure :: ddstressEq_ddstress => ddstressEq_ddstress_cpb06
         ! procedure :: dstressEq_dstress => dstressEq_dstress_vm
         ! procedure :: ddstressEq_ddstress => ddstressEq_ddstress_vm
     end type CPB06
@@ -119,17 +121,37 @@ module muscle_yield_cpb06
         res = pull_back(self%L, self%C2, spectral_gradient(V, df_dlam))
     end function dstressEq_dstress_cpb06
 
-    pure subroutine principal_derivatives(self, lam, df_dlam)
-        ! Derivatives of f = B Phi**(1/a) (Cazacu et al., 2006, Eqs. 9 and 12) with respect to
-        ! the principal values lam_i of Sigma, with Phi = sum_i psi_i**a, psi_i = |lam_i| - k lam_i:
-        ! df/dlam_i = (f/Phi) g_i, with g_i = psi_i**(a-1) (sgn(lam_i) - k).
-        ! Called by the analytical gradient.
+    pure function ddstressEq_ddstress_cpb06(self, stress) result(res)
+        !! Analytical Hessian of the CPB06 equivalent stress (Cazacu et al., 2006, Eqs. 8, 9
+        !! and 12): d2f/dsigma2 = L^T : d2f/dSigma2 : L, with d2f/dSigma2 assembled from the
+        !! principal values of Sigma = L : sigma = C : dev(sigma).
+        !! Called by the return mapping through the ddstressEq_ddstress binding.
+        use muscle_math_spectral_derivs, only : spectral_decomposition, spectral_hessian
         implicit none
         class(CPB06), intent(in) :: self
-        real(real64), intent(in) :: lam(3)       ! Principal values lam_i of Sigma
-        real(real64), intent(out) :: df_dlam(3)  ! df/dlam_i
+        type(ten_3D2Osym), intent(in) :: stress
+        type(ten_3D4O3sym) :: res
 
-        real(real64) :: s(3), psi(3), p(3), phi, f_phi
+        real(real64) :: lam(3), V(3,3), df_dlam(3), d2f_dlam2(3,3)
+
+        call spectral_decomposition(linear_transform(self%L, self%C2, stress), lam, V)
+        call principal_derivatives(self, lam, df_dlam, d2f_dlam2)
+        res = pull_back_hessian(self%L, self%C2, spectral_hessian(lam, V, df_dlam, d2f_dlam2))
+    end function ddstressEq_ddstress_cpb06
+
+    pure subroutine principal_derivatives(self, lam, df_dlam, d2f_dlam2)
+        ! Derivatives of f = B Phi**(1/a) (Cazacu et al., 2006, Eqs. 9 and 12) with respect to
+        ! the principal values lam_i of Sigma, with Phi = sum_i psi_i**a, psi_i = |lam_i| - k lam_i:
+        ! df/dlam_i = (f/Phi) g_i, with g_i = psi_i**(a-1) (sgn(lam_i) - k), and
+        ! d2f/dlam_i dlam_j = (a-1) (f/Phi) (delta_ij psi_i**(a-2) (sgn(lam_i) - k)**2 - g_i g_j/Phi).
+        ! Called by the analytical derivatives.
+        implicit none
+        class(CPB06), intent(in) :: self
+        real(real64), intent(in) :: lam(3)                     ! Principal values lam_i of Sigma
+        real(real64), intent(out) :: df_dlam(3)                ! df/dlam_i
+        real(real64), intent(out), optional :: d2f_dlam2(3,3)  ! d2f/dlam_i dlam_j
+
+        real(real64) :: s(3), psi(3), p(3), phi, f_phi, q
 
         ! s_i = sgn(lam_i) - k, psi_i = |lam_i| - k lam_i and p_i = psi_i**(a-1)
         s(1) = sign(1D0, lam(1)) - self%k
@@ -146,7 +168,42 @@ module muscle_yield_cpb06
         df_dlam(1) = f_phi*p(1)*s(1)
         df_dlam(2) = f_phi*p(2)*s(2)
         df_dlam(3) = f_phi*p(3)*s(3)
+        if (.not. present(d2f_dlam2)) return
+
+        q = (self%a - 1D0)/phi  ! (a-1)/Phi
+        d2f_dlam2(1,1) = (self%a - 1D0)*f_phi*curvature(self, lam(1), psi(1), p(1), s(1)) &
+                         - q*df_dlam(1)*p(1)*s(1)
+        d2f_dlam2(2,2) = (self%a - 1D0)*f_phi*curvature(self, lam(2), psi(2), p(2), s(2)) &
+                         - q*df_dlam(2)*p(2)*s(2)
+        d2f_dlam2(3,3) = (self%a - 1D0)*f_phi*curvature(self, lam(3), psi(3), p(3), s(3)) &
+                         - q*df_dlam(3)*p(3)*s(3)
+        d2f_dlam2(1,2) = -q*df_dlam(1)*p(2)*s(2)
+        d2f_dlam2(2,3) = -q*df_dlam(2)*p(3)*s(3)
+        d2f_dlam2(1,3) = -q*df_dlam(1)*p(3)*s(3)
+        d2f_dlam2(2,1) = d2f_dlam2(1,2)
+        d2f_dlam2(3,2) = d2f_dlam2(2,3)
+        d2f_dlam2(3,1) = d2f_dlam2(1,3)
     end subroutine principal_derivatives
+
+    pure function curvature(self, lam, psi, p, s) result(c)
+        ! c = psi**(a-2) (sgn(lam) - k)**2 for one principal value, with p = psi**(a-1) and
+        ! s = sgn(lam) - k (Cazacu et al., 2006, Eq. 9). Called by principal_derivatives.
+        implicit none
+        class(CPB06), intent(in) :: self
+        real(real64), intent(in) :: lam, psi, p, s
+        real(real64) :: c
+
+        if (psi > 0D0) then
+            c = p*s**2/psi
+        else if (abs(lam) > 0D0) then
+            c = 0D0  ! |k| = 1: h = 0 on this side of lam = 0
+        else
+            ! lam = 0: for a = 2, mean of the one-sided values (1 - k)**2 and (1 + k)**2;
+            ! 0 for a > 2. For 1 <= a < 2 h'' is not bounded at 0 (and for a = 1 neither is
+            ! h'): the values returned there are finite, not derivatives.
+            c = merge(1D0 + self%k**2, 0D0, self%a <= 2D0)
+        end if
+    end function curvature
 
   !   pure function dstressEq_dstress_vm(self, stress) result(res)
   !     ! use muscle_math_operations

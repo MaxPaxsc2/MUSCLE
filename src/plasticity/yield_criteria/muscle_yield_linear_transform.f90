@@ -7,9 +7,9 @@ module muscle_yield_linear_transform
     !! Orthotropic linear transformation S = L : sigma of the anisotropic yield criteria based on
     !! linear transformations of the stress deviator (CPB06, Yld2004-18p), with L = C P_dev:
     !! a 3x3 block on the normal components and one factor per tensorial shear. The criterion
-    !! stores L in init, so no deviator is formed per call. The module gives L, S and the
-    !! adjoint L^T : g that takes a gradient with respect to S to one with respect to sigma
-    !! (Barlat et al., 2005, Eq. 11; Cazacu et al., 2006, Eq. 8).
+    !! stores L in init, so no deviator is formed per call. The module gives L, S, the adjoint
+    !! L^T : g that takes a gradient with respect to S to one with respect to sigma, and
+    !! L^T : H : L for the Hessian (Barlat et al., 2005, Eq. 11; Cazacu et al., 2006, Eq. 8).
     use, intrinsic :: iso_fortran_env, only : real64
     use muscle_tensors
     implicit none
@@ -18,6 +18,7 @@ module muscle_yield_linear_transform
     public :: deviatoric_block
     public :: linear_transform
     public :: pull_back
+    public :: pull_back_hessian
 
 contains
 
@@ -52,7 +53,7 @@ contains
         !! S = L : stress = C : dev(stress) (Barlat et al., 2005, Eq. 11; Cazacu et al., 2006,
         !! Eq. 8): the 3x3 block L acts on the normal components and each factor of c_shear on
         !! its tensorial shear (xy, yz, xz). Called by the Yld2004-18p equivalent stress and by
-        !! the CPB06 gradient.
+        !! the CPB06 derivatives.
         real(real64), intent(in) :: L(3,3)            !! Normal block, from deviatoric_block
         real(real64), intent(in) :: c_shear(3)        !! Shear factors on (xy, yz, xz)
         type(ten_3D2Osym), intent(in) :: stress
@@ -88,9 +89,48 @@ contains
                       yz=c_shear(2)*x%vals(5), xz=c_shear(3)*x%vals(6))
     end function pull_back
 
+    pure function pull_back_hessian(L, c_shear, H) result(res)
+        !! L^T : H : L, the second derivative by the chain rule through S = L : stress (Barlat
+        !! et al., 2005, Eq. 11; Cazacu et al., 2006, Eq. 8), for a fourth-order H with major and
+        !! minor symmetries, by blocks of its 6x6 components: L^T Hnn L on the normal block,
+        !! L^T Hns c on the normal-shear block and c Hss c on the shear block. Called by the
+        !! CPB06 Hessian.
+        real(real64), intent(in) :: L(3,3)            !! Normal block, from deviatoric_block
+        real(real64), intent(in) :: c_shear(3)        !! Shear factors on (xy, yz, xz)
+        type(ten_3D4O3sym), intent(in) :: H
+        type(ten_3D4O3sym) :: res
+
+        real(real64), dimension(3) :: cxx, cyy, czz, rxx, ryy, rzz, nxy, nyz, nxz
+
+        ! Normal block: L^T on the columns of Hnn, then on the rows of the result
+        cxx = normal_pull_back(L, H%vals(1), H%vals(7), H%vals(12))
+        cyy = normal_pull_back(L, H%vals(7), H%vals(2), H%vals(8))
+        czz = normal_pull_back(L, H%vals(12), H%vals(8), H%vals(3))
+        rxx = normal_pull_back(L, cxx(1), cyy(1), czz(1))
+        ryy = normal_pull_back(L, cxx(2), cyy(2), czz(2))
+        rzz = normal_pull_back(L, cxx(3), cyy(3), czz(3))
+        ! Normal-shear block: L^T on each shear column of Hns, times its shear factor
+        nxy = c_shear(1)*normal_pull_back(L, H%vals(16), H%vals(13), H%vals(9))
+        nyz = c_shear(2)*normal_pull_back(L, H%vals(19), H%vals(17), H%vals(14))
+        nxz = c_shear(3)*normal_pull_back(L, H%vals(21), H%vals(20), H%vals(18))
+        ! Shear block, written in place
+        call res%init(xxxx=rxx(1), yyyy=ryy(2), zzzz=rzz(3),                           &
+                      xyxy=c_shear(1)**2*H%vals(4), yzyz=c_shear(2)**2*H%vals(5),      &
+                      xzxz=c_shear(3)**2*H%vals(6),                                     &
+                      xxyy=rxx(2), yyzz=ryy(3), zzxy=nxy(3),                           &
+                      xyyz=c_shear(1)*c_shear(2)*H%vals(10),                            &
+                      yzxz=c_shear(2)*c_shear(3)*H%vals(11),                            &
+                      xxzz=rxx(3), yyxy=nxy(2), zzyz=nyz(3),                           &
+                      xyxz=c_shear(1)*c_shear(3)*H%vals(15),                            &
+                      xxxy=nxy(1), yyyz=nyz(2), zzxz=nxz(3),                           &
+                      xxyz=nyz(1), yyxz=nxz(2),                                         &
+                      xxxz=nxz(1))
+    end function pull_back_hessian
+
     pure function normal_pull_back(L, x, y, z) result(res)
         ! L^T (x, y, z) on the normal components, from the chain rule through S = L : stress
-        ! (Barlat et al., 2005, Eq. 11; Cazacu et al., 2006, Eq. 8); used by pull_back
+        ! (Barlat et al., 2005, Eq. 11; Cazacu et al., 2006, Eq. 8); used by pull_back and, on
+        ! the columns and rows of the 6x6 components, by pull_back_hessian
         real(real64), intent(in) :: L(3,3)
         real(real64), intent(in) :: x, y, z
         real(real64) :: res(3)
