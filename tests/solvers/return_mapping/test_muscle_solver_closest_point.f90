@@ -14,6 +14,12 @@ program test_muscle_solver_closest_point
     ! call test_closest_point_druckerPrager_uniaxial_tensile(passed)
     ! if (.not. passed) STOP 4
  
+    call test_closest_point_packed_shear(passed)
+    if (.not. passed) STOP 5
+
+    call test_closest_point_keeps_state_n(passed)
+    if (.not. passed) STOP 6
+
     print*, "Passed!", passed
 end program test_muscle_solver_closest_point
 
@@ -374,3 +380,138 @@ subroutine test_closest_point_druckerPrager_uniaxial_tensile(passed)
 
     return
 end subroutine test_closest_point_druckerPrager_uniaxial_tensile
+
+! FE boundary: the FE program reads the result through pack_to_fea and commits only after global
+! equilibrium. Both cases use von Mises with Swift hardening and a strain with all six components
+! nonzero, written as a multiple of the yield strain eps_y along a fixed direction.
+
+subroutine test_closest_point_packed_shear(passed)
+    ! The FE program reads the plastic strain from slots 7-12. Its shears must be the tensorial
+    ! components (eps_xy, not gamma_xy = 2*eps_xy): with them the packed stress is the elastic
+    ! law of the total minus the plastic strain.
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_hard_swift
+    use muscle_yield_vonmises
+    use muscle_elasticity_linear
+    use muscle_plastic_history
+    use muscle_solver_closest_point
+    implicit none
+    logical, intent(out) :: passed
+
+    type(Elasticity_linear) :: elas
+    type(Swift_hardening) :: hardening
+    type(VonMises) :: vm
+    type(Closest_point) :: solver
+    type(Plastic_material_history) :: history
+    type(ten_3D2Osym) :: strain, packed_stress, packed_strain_p
+    real(real64) :: hsv(13), eps_y
+    integer :: status
+    real(real64), parameter :: TOL = 1.0D-10
+    ! Newton tolerance of the solver
+    real(real64), parameter :: TOL_NW = 1.0D-5
+
+    call elas%set_parameters(young=70000.0D0, poisson=0.33D0)
+    hardening = Swift_hardening(k=500.0D0, n=0.2D0, e0=0.01D0)
+    call solver%init(elasticity=elas, hardening=hardening, yield=vm)
+    eps_y = hardening%stress(0.0D0)/70000.0D0
+
+    ! Five times the yield strain: plastic, with large plastic shears
+    call strain%init(xx=4.0D0*eps_y, yy=-1.5D0*eps_y, zz=-2.5D0*eps_y, &
+                     xy=2.0D0*eps_y, yz=-1.0D0*eps_y, xz=1.5D0*eps_y)
+    call solver%solve(strain=strain, history=history, status=status)
+    if (status /= STATUS_CONVERGED) then
+        print*, "FAIL: Packed shear case did not converge, status:", status
+        passed = .false.
+        return
+    end if
+
+    hsv = 0.0D0
+    call history%pack_to_fea(hsv)
+    call packed_stress%init(hsv(1:6))
+    call packed_strain_p%init(hsv(7:12))
+
+    passed = packed_stress%is_approx(elas%stress(strain - packed_strain_p), tol=TOL)
+    if (.not. passed) then
+        print*, "FAIL: Packed stress is not the elastic law of the packed (tensorial) plastic strain"
+        return
+    end if
+
+    ! One step from the virgin state: eps_p = dgamma*n with the von Mises normal n of unit
+    ! equivalent norm, so slot 13 is sqrt(2/3 eps_p:eps_p)
+    passed = abs(hsv(13) - sqrt(2.0D0/3.0D0*(packed_strain_p .ddot. packed_strain_p))) < TOL_NW
+    if (.not. passed) then
+        print*, "FAIL: Slot 13 is not the equivalent plastic strain of slots 7-12"
+        return
+    end if
+end subroutine test_closest_point_packed_shear
+
+
+subroutine test_closest_point_keeps_state_n(passed)
+    ! The FE program commits only after global equilibrium. Before that, neither a failed attempt
+    ! (rolled back and retried) nor a converged one may write the committed state_n.
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_hard_swift
+    use muscle_yield_vonmises
+    use muscle_elasticity_linear
+    use muscle_plastic_history
+    use muscle_solver_closest_point
+    implicit none
+    logical, intent(out) :: passed
+
+    type(Elasticity_linear) :: elas
+    type(Swift_hardening) :: hardening
+    type(VonMises) :: vm
+    type(Closest_point) :: solver, one_iteration
+    type(Plastic_material_history) :: history
+    type(Plastic_state) :: state_before
+    type(ten_3D2Osym) :: strain_1, strain_2
+    real(real64) :: eps_y
+    integer :: status
+    real(real64), parameter :: TOL = 1.0D-12
+
+    call elas%set_parameters(young=70000.0D0, poisson=0.33D0)
+    hardening = Swift_hardening(k=500.0D0, n=0.2D0, e0=0.01D0)
+    call solver%init(elasticity=elas, hardening=hardening, yield=vm)
+    ! One Newton iteration is not enough for step 2: forces a failed attempt
+    call one_iteration%init(elasticity=elas, hardening=hardening, yield=vm, iter_nw=1)
+    eps_y = hardening%stress(0.0D0)/70000.0D0
+
+    ! Step 1, converged and committed, so state_n is a plastic state and not the virgin one
+    call strain_1%init(xx=1.6D0*eps_y, yy=-0.6D0*eps_y, zz=-1.0D0*eps_y, &
+                       xy=0.8D0*eps_y, yz=-0.4D0*eps_y, xz=0.6D0*eps_y)
+    call solver%solve(strain=strain_1, history=history, status=status)
+    if (status /= STATUS_CONVERGED) then
+        print*, "FAIL: Step 1 did not converge, status:", status
+        passed = .false.
+        return
+    end if
+    call history%commit()
+    state_before = history%state_n
+
+    ! Step 2: failed attempt with a single Newton iteration, rollback, converged retry
+    call strain_2%init(xx=3.2D0*eps_y, yy=-1.2D0*eps_y, zz=-2.0D0*eps_y, &
+                       xy=1.6D0*eps_y, yz=-0.8D0*eps_y, xz=1.2D0*eps_y)
+    call one_iteration%solve(strain=strain_2, history=history, status=status)
+    if (status /= STATUS_NONCONVERGED) then
+        print*, "FAIL: Forced attempt was expected not to converge, status:", status
+        passed = .false.
+        return
+    end if
+    call history%rollback()
+    call solver%solve(strain=strain_2, history=history, status=status)
+    if (status /= STATUS_CONVERGED) then
+        print*, "FAIL: Retry of step 2 did not converge, status:", status
+        passed = .false.
+        return
+    end if
+
+    passed = history%state_n%stress%is_approx(state_before%stress, tol=TOL) .and. &
+             history%state_n%strain_p%is_approx(state_before%strain_p, tol=TOL) .and. &
+             abs(history%state_n%strain_pf - state_before%strain_pf) <= TOL*state_before%strain_pf
+    if (.not. passed) then
+        print*, "FAIL: An attempt before commit changed state_n"
+        return
+    end if
+end subroutine test_closest_point_keeps_state_n
