@@ -5,6 +5,7 @@ module muscle_yield_cpb06
     use, intrinsic :: iso_fortran_env
     use muscle_tensors
     use muscle_yield_base
+    use muscle_yield_linear_transform, only : deviatoric_block, linear_transform, pull_back
     implicit none
     PRIVATE
 
@@ -17,10 +18,14 @@ module muscle_yield_cpb06
       ! Normalization factor B (Cazacu et al., 2006, Eq. 12). It depends only on C1, k and a,
       ! so it is computed once in init instead of in every stress_eq call
       real(real64) :: B
+      ! Normal block of L = C1 P_dev, the map sigma -> Sigma of Cazacu et al. (2006, Eq. 8) on
+      ! the normal components (on the shears it is C2). Computed in init for the derivatives
+      real(real64) :: L(3,3)
 
     contains
         procedure :: stress_eq
         procedure :: init
+        procedure :: dstressEq_dstress => dstressEq_dstress_cpb06
         ! procedure :: dstressEq_dstress => dstressEq_dstress_vm
         ! procedure :: ddstressEq_ddstress => ddstressEq_ddstress_vm
     end type CPB06
@@ -55,6 +60,7 @@ module muscle_yield_cpb06
         gamma(3) = (2D0*self%C1(3,1) - self%C1(3,2) - self%C1(3,3))/3D0
 
         self%B = sum((abs(gamma) - k*gamma)**a)**(-1D0/a)
+        self%L = deviatoric_block(self%C1)
 
     end subroutine init
 
@@ -94,6 +100,53 @@ module muscle_yield_cpb06
         res = res*self%B
 
     end function stress_eq
+
+    pure function dstressEq_dstress_cpb06(self, stress) result(res)
+        !! Analytical gradient of the CPB06 equivalent stress (Cazacu et al., 2006, Eqs. 8, 9
+        !! and 12): df/dsigma = L^T : sum_i (df/dlam_i) E_i, with lam_i and E_i the principal
+        !! values and eigenprojections of Sigma = L : sigma = C : dev(sigma).
+        !! Called by the return mapping through the dstressEq_dstress binding.
+        use muscle_math_spectral_derivs, only : spectral_decomposition, spectral_gradient
+        implicit none
+        class(CPB06), intent(in) :: self
+        type(ten_3D2Osym), intent(in) :: stress
+        type(ten_3D2Osym) :: res
+
+        real(real64) :: lam(3), V(3,3), df_dlam(3)
+
+        call spectral_decomposition(linear_transform(self%L, self%C2, stress), lam, V)
+        call principal_derivatives(self, lam, df_dlam)
+        res = pull_back(self%L, self%C2, spectral_gradient(V, df_dlam))
+    end function dstressEq_dstress_cpb06
+
+    pure subroutine principal_derivatives(self, lam, df_dlam)
+        ! Derivatives of f = B Phi**(1/a) (Cazacu et al., 2006, Eqs. 9 and 12) with respect to
+        ! the principal values lam_i of Sigma, with Phi = sum_i psi_i**a, psi_i = |lam_i| - k lam_i:
+        ! df/dlam_i = (f/Phi) g_i, with g_i = psi_i**(a-1) (sgn(lam_i) - k).
+        ! Called by the analytical gradient.
+        implicit none
+        class(CPB06), intent(in) :: self
+        real(real64), intent(in) :: lam(3)       ! Principal values lam_i of Sigma
+        real(real64), intent(out) :: df_dlam(3)  ! df/dlam_i
+
+        real(real64) :: s(3), psi(3), p(3), phi, f_phi
+
+        ! s_i = sgn(lam_i) - k, psi_i = |lam_i| - k lam_i and p_i = psi_i**(a-1)
+        s(1) = sign(1D0, lam(1)) - self%k
+        s(2) = sign(1D0, lam(2)) - self%k
+        s(3) = sign(1D0, lam(3)) - self%k
+        psi(1) = lam(1)*s(1)
+        psi(2) = lam(2)*s(2)
+        psi(3) = lam(3)*s(3)
+        p(1) = psi(1)**(self%a - 1D0)
+        p(2) = psi(2)**(self%a - 1D0)
+        p(3) = psi(3)**(self%a - 1D0)
+        phi = psi(1)*p(1) + psi(2)*p(2) + psi(3)*p(3)
+        f_phi = self%B*phi**(1D0/self%a)/phi  ! f/Phi, with f the equivalent stress of stress_eq
+        df_dlam(1) = f_phi*p(1)*s(1)
+        df_dlam(2) = f_phi*p(2)*s(2)
+        df_dlam(3) = f_phi*p(3)*s(3)
+    end subroutine principal_derivatives
 
   !   pure function dstressEq_dstress_vm(self, stress) result(res)
   !     ! use muscle_math_operations

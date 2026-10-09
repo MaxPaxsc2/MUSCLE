@@ -9,6 +9,9 @@ program test_muscle_yield_linear_transform
     call test_linear_transform_pressure_2(passed)
     if (.not. passed) STOP 2
 
+    call test_linear_transform_pull_back_3(passed)
+    if (.not. passed) STOP 3
+
     print*, "Passed!", passed
     STOP 0
 end program test_muscle_yield_linear_transform
@@ -96,3 +99,25 @@ subroutine test_linear_transform_pressure_2(passed)
     if (.not. passed) print*, "Linear transform with a large pressure failed:", S_new%vals, &
                               S_ref%vals
 end subroutine test_linear_transform_pressure_2
+
+subroutine test_linear_transform_pull_back_3(passed)
+    ! Adjoint identity (L^T : x) : y = x : (L : y) with x and y full tensors: every entry of L^T
+    ! must be the transpose of the one used by linear_transform
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_yield_linear_transform
+    implicit none
+    logical, intent(out) :: passed
+
+    real(real64), parameter :: TOL = 1.0D-14
+    real(real64) :: C(3,3), c_shear(3), L(3,3), lhs, rhs
+    type(ten_3D2Osym) :: x, y
+
+    call linear_transform_test_data(C, c_shear, x)
+    call y%init((/-0.3D0, 0.8D0, 0.25D0, -0.6D0, 0.45D0, 0.9D0/))
+    L = deviatoric_block(C)
+    lhs = pull_back(L, c_shear, x) .ddot. y
+    rhs = x .ddot. linear_transform(L, c_shear, y)
+    passed = abs(lhs - rhs) < TOL*abs(rhs)
+    if (.not. passed) print*, "Pull back adjoint failed:", lhs, rhs
+end subroutine test_linear_transform_pull_back_3
