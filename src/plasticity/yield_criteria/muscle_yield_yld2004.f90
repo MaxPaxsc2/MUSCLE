@@ -17,6 +17,7 @@ module muscle_yield_yld2004
     use, intrinsic :: iso_fortran_env
     use muscle_tensors
     use muscle_yield_base
+    use muscle_yield_linear_transform, only : deviatoric_block, linear_transform
     implicit none
     private
 
@@ -51,11 +52,11 @@ contains
         real(real64), intent(in) :: cpp12, cpp13, cpp21, cpp23, cpp31, cpp32, cpp44, cpp55, cpp66
         real(real64), intent(in) :: a
 
-        self%Lp = deviatoric_block(cp12, cp13, cp21, cp23, cp31, cp32)
+        self%Lp = deviatoric_block(normal_block(cp12, cp13, cp21, cp23, cp31, cp32))
         self%cp_shear(1) = cp44
         self%cp_shear(2) = cp55
         self%cp_shear(3) = cp66
-        self%Lpp = deviatoric_block(cpp12, cpp13, cpp21, cpp23, cpp31, cpp32)
+        self%Lpp = deviatoric_block(normal_block(cpp12, cpp13, cpp21, cpp23, cpp31, cpp32))
         self%cpp_shear(1) = cpp44
         self%cpp_shear(2) = cpp55
         self%cpp_shear(3) = cpp66
@@ -83,40 +84,22 @@ contains
                        + abs(lp(3) - lpp(3))**self%a))**(1D0/self%a)
     end function stress_eq
 
-    pure function deviatoric_block(c12, c13, c21, c23, c31, c32) result(L)
-        ! Normal block of L = C P_dev, with C the normal block of C' or C'' (Barlat et al., 2005,
-        ! Eq. 15: zero diagonal, -cIJ off it): L_ij = C_ij - (1/3) sum_k C_ik. Called by init.
+    pure function normal_block(c12, c13, c21, c23, c31, c32) result(C)
+        ! Normal block of C' or C'' (Barlat et al., 2005, Eq. 15): zero diagonal and -cIJ off it.
+        ! Called by init.
         implicit none
         real(real64), intent(in) :: c12, c13, c21, c23, c31, c32
-        real(real64) :: L(3,3)
+        real(real64) :: C(3,3)
 
-        L(1,1) = (c12 + c13)/3D0
-        L(1,2) = (c13 - 2D0*c12)/3D0
-        L(1,3) = (c12 - 2D0*c13)/3D0
-        L(2,1) = (c23 - 2D0*c21)/3D0
-        L(2,2) = (c21 + c23)/3D0
-        L(2,3) = (c21 - 2D0*c23)/3D0
-        L(3,1) = (c32 - 2D0*c31)/3D0
-        L(3,2) = (c31 - 2D0*c32)/3D0
-        L(3,3) = (c31 + c32)/3D0
-    end function deviatoric_block
-
-    pure function linear_transform(L, c_shear, stress) result(res)
-        ! S = L:stress with L = C P_dev (Barlat et al., 2005, Eq. 11): S' from (Lp, cp_shear),
-        ! S'' from (Lpp, cpp_shear). The 3x3 block acts on the normal components and each factor
-        ! on its tensorial shear. Called by stress_eq.
-        implicit none
-        real(real64), intent(in) :: L(3,3)
-        real(real64), intent(in) :: c_shear(3)
-        type(ten_3D2Osym), intent(in) :: stress
-        type(ten_3D2Osym) :: res
-
-        res%vals(1) = L(1,1)*stress%vals(1) + L(1,2)*stress%vals(2) + L(1,3)*stress%vals(3)
-        res%vals(2) = L(2,1)*stress%vals(1) + L(2,2)*stress%vals(2) + L(2,3)*stress%vals(3)
-        res%vals(3) = L(3,1)*stress%vals(1) + L(3,2)*stress%vals(2) + L(3,3)*stress%vals(3)
-        res%vals(4) = c_shear(1)*stress%vals(4)
-        res%vals(5) = c_shear(2)*stress%vals(5)
-        res%vals(6) = c_shear(3)*stress%vals(6)
-    end function linear_transform
+        C(1,1) = 0D0
+        C(1,2) = -c12
+        C(1,3) = -c13
+        C(2,1) = -c21
+        C(2,2) = 0D0
+        C(2,3) = -c23
+        C(3,1) = -c31
+        C(3,2) = -c32
+        C(3,3) = 0D0
+    end function normal_block
 
 end module muscle_yield_yld2004
