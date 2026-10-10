@@ -23,6 +23,9 @@ program test_muscle_solver_closest_point
     call test_closest_point_hill48_tension_shear(passed)
     if (.not. passed) STOP 7
 
+    call test_closest_point_yld2004_tension_shear(passed)
+    if (.not. passed) STOP 9
+
     print*, "Passed!", passed
 end program test_muscle_solver_closest_point
 
@@ -716,3 +719,199 @@ contains
     end subroutine check_step
 
 end subroutine test_closest_point_hill48_tension_shear
+
+subroutine test_closest_point_yld2004_tension_shear(passed)
+    ! Yld2004-18p, AA2090-T3, a = 8 (Barlat et al., 2005, Table 2, Eqs. 14 and 15).
+    ! One Closest_point step from zero plastic strain. Expected stress, plastic
+    ! strain and r: associated flow, mpmath at 40 digits. Not taken from this solver.
+    ! Elasticity and Swift match test_closest_point_hill48_tension_shear.
+    ! Table shears are (yz, zx, xy); (c44, c55, c66) = (xy, yz, xz) = (c66, c44, c55).
+    ! 45 deg turns on xy (library c44). RD and TD use the normal blocks. Each pure
+    ! shear checks one coefficient; they all differ, so a swap changes tau.
+    use muscle_tensors
+    use, intrinsic :: iso_fortran_env, only : real64
+    use muscle_hard_swift, only : Swift_hardening
+    use muscle_yield_yld2004, only : Yld2004
+    use muscle_elasticity_linear, only : Elasticity_linear
+    use muscle_plastic_history, only : Plastic_material_history
+    use muscle_solver_closest_point, only : Closest_point, STATUS_CONVERGED
+    implicit none
+
+    real(real64), parameter :: EPS = 1.0D-5
+    real(real64), parameter :: EPS_PF = 1.0D-7
+    real(real64), parameter :: EPS_R = 1.0D-6
+    ! a = 8 with the base-class Hessian: RD tangent misses tangent_numerical by ~5e-7.
+    real(real64), parameter :: EPS_TAN = 1.0D-6
+    logical, intent(out) :: passed
+    type(Yld2004) :: yld
+    type(Swift_hardening) :: sw
+    type(Elasticity_linear) :: elas
+    real(real64) :: r0, r45, r90
+    ! r from the gradient of sigma_bar (mpmath), not a measured input.
+    r0 = 2.4506026150375928D-1
+    r45 = 1.5445248728743325D+0
+    r90 = 6.8494596476625122D-1
+    call yld%init(cp12=-0.069888D0, cp13=0.936408D0, cp21=0.079143D0, cp23=1.003060D0, &
+                  cp31=0.524741D0, cp32=1.363180D0, &
+                  cp44=0.954322D0, cp55=1.023770D0, cp66=1.069060D0, &
+                  cpp12=0.981171D0, cpp13=0.476741D0, cpp21=0.575316D0, cpp23=0.866827D0, &
+                  cpp31=1.145010D0, cpp32=-0.079294D0, &
+                  cpp44=1.404620D0, cpp55=1.051660D0, cpp66=1.147100D0, a=8.0D0)
+    call elas%set_parameters(young=1000.0D0, poisson=0.3D0)
+    sw = Swift_hardening(k=100.0D0, n=0.1D0, e0=1.0D-4)
+
+    ! 45 deg first: xy shear carries library c44 (paper c66).
+    call check_direction(passed, yld, sw, elas, 45.0D0, r45, &
+        3.0304826648644007D+1, 3.0304826648644007D+1, 0.0D0, 3.0304826648644007D+1, &
+        2.5751574917503007D-2, 4.0708032438391375D-2, -4.2215746036979176D-2, &
+        8.8532034332008620D-2, &
+        4.5381962634522018D-3, 1.9494653784340570D-2, -2.4032850047792772D-2, &
+        4.9135759688771411D-2)
+    if (.not. passed) return
+
+    ! RD: normal anisotropy only. r0 = eps_p,yy / eps_p,zz.
+    call check_direction(passed, yld, sw, elas, 0.0D0, r0, &
+        7.4178581528627858D+1, 0.0D0, 0.0D0, 0.0D0, &
+        1.2414465849352762D-1, -3.2088198746208292D-2, -6.2385027135868185D-2, 0.0D0, &
+        4.9966076964899762D-2, -9.8346242876199350D-3, -4.0131452677279827D-2, 0.0D0)
+    if (.not. passed) return
+
+    ! TD: the other rows of C' and C''. r90 = eps_p,xx / eps_p,zz.
+    call check_direction(passed, yld, sw, elas, 90.0D0, r90, &
+        0.0D0, 6.7189605089885621D+1, 0.0D0, 0.0D0, &
+        -4.2581342990200921D-2, 1.2235308921586177D-1, -5.2895904189706596D-2, 0.0D0, &
+        -2.2424461463235235D-2, 5.5163484125976144D-2, -3.2739022662740909D-2, 0.0D0)
+    if (.not. passed) return
+
+    ! Pure shear (Voigt slot 4, 5 or 6). A swapped shear coefficient changes tau.
+    call check_shear(passed, yld, sw, elas, 4, &
+        3.4198389998627304D+1, 9.8647778421333424D-2, 5.4189871423117929D-2)
+    if (.not. passed) return
+
+    call check_shear(passed, yld, sw, elas, 5, &
+        3.8911666904622645D+1, 9.8211149215364435D-2, 4.7625982239354997D-2)
+    if (.not. passed) return
+
+    call check_shear(passed, yld, sw, elas, 6, &
+        3.6439657613105284D+1, 9.8228409167719209D-2, 5.0856854270682340D-2)
+
+contains
+
+    ! Resolve and check one prescribed uniaxial state (Barlat et al., 2005, Eq. 14).
+    subroutine check_direction(ok, yld, sw, elas, theta_deg, r_ref, &
+                               sxx, syy, szz, sxy, exx, eyy, ezz, exy, &
+                               pxx, pyy, pzz, pxy)
+        implicit none
+        logical, intent(out) :: ok
+        type(Yld2004), intent(in) :: yld
+        type(Swift_hardening), intent(in) :: sw
+        type(Elasticity_linear), intent(in) :: elas
+        real(real64), intent(in) :: theta_deg, r_ref
+        real(real64), intent(in) :: sxx, syy, szz, sxy
+        real(real64), intent(in) :: exx, eyy, ezz, exy
+        real(real64), intent(in) :: pxx, pyy, pzz, pxy
+        type(ten_3D2Osym) :: strain, strain_p
+        type(ten_3D2Osym) :: expected_stress, expected_plastic
+        type(ten_3D2Osym) :: width_projection
+        real(real64) :: r_theta, th, sn, cs, width
+
+        call expected_stress%init(xx=sxx, yy=syy, zz=szz, xy=sxy, yz=0.0D0, xz=0.0D0)
+        call expected_plastic%init(xx=pxx, yy=pyy, zz=pzz, xy=pxy, yz=0.0D0, xz=0.0D0)
+        call strain%init(xx=exx, yy=eyy, zz=ezz, xy=exy, yz=0.0D0, xz=0.0D0)
+        call check_step(ok, yld, sw, elas, theta_deg, strain, expected_stress, &
+                        expected_plastic, strain_p)
+        if (.not. ok) return
+
+        ! Lankford r = width/thickness equals the mpmath gradient, not an input r.
+        th = theta_deg*acos(-1.0D0)/180.0D0
+        sn = sin(th)
+        cs = cos(th)
+        call width_projection%init(xx=sn*sn, yy=cs*cs, zz=0.0D0, &
+                                   xy=-sn*cs, yz=0.0D0, xz=0.0D0)
+        width = width_projection .ddot. strain_p
+        r_theta = width/strain_p%zz()
+        ok = abs(r_theta - r_ref) < EPS_R
+        if (.not. ok) print *, "Yld2004 r", theta_deg, r_theta, r_ref
+    end subroutine check_direction
+
+    ! Pure shear: only Voigt slot i is nonzero in the strain, the stress and the flow.
+    subroutine check_shear(ok, yld, sw, elas, i, tau, e, p)
+        implicit none
+        logical, intent(out) :: ok
+        type(Yld2004), intent(in) :: yld
+        type(Swift_hardening), intent(in) :: sw
+        type(Elasticity_linear), intent(in) :: elas
+        integer, intent(in) :: i
+        real(real64), intent(in) :: tau, e, p
+        type(ten_3D2Osym) :: strain, strain_p, expected_stress, expected_plastic
+        real(real64) :: slot(6)
+
+        slot = 0.0D0
+        slot(i) = 1.0D0
+        call strain%init(e*slot)
+        call expected_stress%init(tau*slot)
+        call expected_plastic%init(p*slot)
+        call check_step(ok, yld, sw, elas, real(i, real64), strain, expected_stress, &
+                        expected_plastic, strain_p)
+    end subroutine check_shear
+
+    ! One Closest_point step from zero plastic strain.
+    subroutine check_step(ok, yld, sw, elas, tag, strain, expected_stress, expected_plastic, &
+                          strain_p)
+        implicit none
+        logical, intent(out) :: ok
+        type(Yld2004), intent(in) :: yld
+        type(Swift_hardening), intent(in) :: sw
+        type(Elasticity_linear), intent(in) :: elas
+        real(real64), intent(in) :: tag
+        type(ten_3D2Osym), intent(in) :: strain, expected_stress, expected_plastic
+        type(ten_3D2Osym), intent(out) :: strain_p
+        type(Plastic_material_history) :: history
+        type(Closest_point) :: solver
+        type(ten_3D2Osym) :: strain_p0, stress
+        type(ten_3D4O2sym) :: tangent, numerical_tangent
+        real(real64) :: strain_pf
+        integer :: status, iters
+
+        ok = .false.
+        call strain_p0%init(xx=0.0D0, yy=0.0D0, zz=0.0D0, xy=0.0D0, yz=0.0D0, xz=0.0D0)
+        call history%init(strain_p=strain_p0, strain_pf=0.0D0)
+        call solver%init(elasticity=elas, hardening=sw, yield=yld)
+        call solver%solve(strain=strain, history=history, status=status, iters=iters)
+
+        ! This prescribed step is plastic and must report convergence.
+        ok = status == STATUS_CONVERGED
+        if (.not. ok) print *, "Yld2004 status", tag, status
+        if (.not. ok) return
+
+        stress = history%state_np1%stress
+        strain_p = history%state_np1%strain_p
+        strain_pf = history%state_np1%strain_pf
+
+        ok = stress%is_approx(expected_stress, tol=EPS)
+        if (.not. ok) print *, "Yld2004 stress", tag, stress%vals
+        if (.not. ok) return
+
+        ! Plastic multiplier equal to the prescribed equivalent plastic strain.
+        ok = abs(strain_pf - 0.05D0) < EPS_PF
+        if (.not. ok) print *, "Yld2004 strain_pf", tag, strain_pf
+        if (.not. ok) return
+
+        ! Associated flow.
+        ok = strain_p%is_approx(expected_plastic, tol=EPS)
+        if (.not. ok) print *, "Yld2004 strain_p", tag, strain_p%vals
+        if (.not. ok) return
+
+        ! Same iteration bound as the Hill48 case. At eps_bar = 0.05 it is tight.
+        ok = iters .le. 6
+        if (.not. ok) print *, "Yld2004 iterations", tag, iters, "status", status
+        if (.not. ok) return
+
+        ! Consistent tangent against tangent_numerical.
+        call solver%tangent_numerical(strain=strain, history=history, tangent=numerical_tangent)
+        call solver%tangent(strain=strain, history=history, tangent=tangent)
+        ok = tangent%is_approx(numerical_tangent, tol=EPS_TAN)
+        if (.not. ok) print *, "Yld2004 tangent", tag
+    end subroutine check_step
+
+end subroutine test_closest_point_yld2004_tension_shear
