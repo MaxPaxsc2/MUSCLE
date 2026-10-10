@@ -77,7 +77,7 @@ contains
         !! L^T : x, the adjoint of linear_transform: by the chain rule through S = L : stress
         !! (Barlat et al., 2005, Eq. 11; Cazacu et al., 2006, Eq. 8) it takes a derivative with
         !! respect to S to one with respect to the stress. Called by the CPB06 and Yld2004-18p
-        !! gradients.
+        !! gradients and by the Yld2004-18p Hessian.
         real(real64), intent(in) :: L(3,3)            !! Normal block, from deviatoric_block
         real(real64), intent(in) :: c_shear(3)        !! Shear factors on (xy, yz, xz)
         type(ten_3D2Osym), intent(in) :: x
@@ -95,7 +95,7 @@ contains
         !! et al., 2005, Eq. 11; Cazacu et al., 2006, Eq. 8), for a fourth-order H with major and
         !! minor symmetries, by blocks of its 6x6 components: L^T Hnn L on the normal block,
         !! L^T Hns c on the normal-shear block and c Hss c on the shear block. Called by the
-        !! CPB06 Hessian.
+        !! CPB06 and Yld2004-18p Hessians.
         real(real64), intent(in) :: L(3,3)            !! Normal block, from deviatoric_block
         real(real64), intent(in) :: c_shear(3)        !! Shear factors on (xy, yz, xz)
         type(ten_3D4O3sym), intent(in) :: H

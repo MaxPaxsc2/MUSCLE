@@ -17,7 +17,8 @@ module muscle_yield_yld2004
     use, intrinsic :: iso_fortran_env
     use muscle_tensors
     use muscle_yield_base
-    use muscle_yield_linear_transform, only : deviatoric_block, linear_transform, pull_back
+    use muscle_yield_linear_transform, only : deviatoric_block, linear_transform, pull_back, &
+                                             pull_back_hessian
     implicit none
     private
 
@@ -38,6 +39,7 @@ module muscle_yield_yld2004
         procedure :: init
         procedure :: stress_eq
         procedure :: dstressEq_dstress => dstressEq_dstress_yld2004
+        procedure :: ddstressEq_ddstress => ddstressEq_ddstress_yld2004
     end type Yld2004
 
 contains
@@ -105,11 +107,46 @@ contains
               + pull_back(self%Lpp, self%cpp_shear, spectral_gradient(Vpp, dfpp))
     end function dstressEq_dstress_yld2004
 
-    pure subroutine principal_derivatives(self, lp, lpp, dfp, dfpp)
+    pure function ddstressEq_ddstress_yld2004(self, stress) result(res)
+        !! Analytical Hessian L'^T H' L' + L''^T H'' L'' + L'^T M L'' + (L'^T M L'')^T
+        !! (Barlat et al., 2005, Eqs. 11 and 14). H' and H'' come from spectral_hessian, each with
+        !! the other tensor fixed. The cross term M = sum_ij d2f/dlam'_i dlam''_j E'_i (x) E''_j,
+        !! with E'_i = v'_i (x) v'_i, has no eigenvector-rotation part: E'_i does not depend on S''.
+        !! Called by the return mapping through the ddstressEq_ddstress binding.
+        use muscle_math_spectral_derivs, only : spectral_decomposition, spectral_gradient, &
+                                                spectral_hessian
+        implicit none
+        class(Yld2004), intent(in) :: self
+        type(ten_3D2Osym), intent(in) :: stress
+        type(ten_3D4O3sym) :: res
+
+        real(real64) :: lp(3), lpp(3), Vp(3,3), Vpp(3,3), dfp(3), dfpp(3)
+        real(real64) :: d2fp(3,3), d2fpp(3,3), d2fx(3,3)
+        type(ten_3D2Osym) :: a1, a2, a3, b1, b2, b3
+
+        call spectral_decomposition(linear_transform(self%Lp, self%cp_shear, stress), lp, Vp)
+        call spectral_decomposition(linear_transform(self%Lpp, self%cpp_shear, stress), lpp, Vpp)
+        call principal_derivatives(self, lp, lpp, dfp, dfpp, d2fp, d2fpp, d2fx)
+        ! Cross term: L'^T M L'' + (L'^T M L'')^T = sum_i 2 sym(A_i (x) B_i), with
+        ! A_i = L'^T : E'_i and B_i = L''^T : sum_j d2f/dlam'_i dlam''_j E''_j
+        a1 = pull_back(self%Lp, self%cp_shear, spectral_gradient(Vp, [1D0, 0D0, 0D0]))
+        a2 = pull_back(self%Lp, self%cp_shear, spectral_gradient(Vp, [0D0, 1D0, 0D0]))
+        a3 = pull_back(self%Lp, self%cp_shear, spectral_gradient(Vp, [0D0, 0D0, 1D0]))
+        b1 = pull_back(self%Lpp, self%cpp_shear, spectral_gradient(Vpp, d2fx(1,:)))
+        b2 = pull_back(self%Lpp, self%cpp_shear, spectral_gradient(Vpp, d2fx(2,:)))
+        b3 = pull_back(self%Lpp, self%cpp_shear, spectral_gradient(Vpp, d2fx(3,:)))
+        res = pull_back_hessian(self%Lp, self%cp_shear, spectral_hessian(lp, Vp, dfp, d2fp))     &
+              + pull_back_hessian(self%Lpp, self%cpp_shear, spectral_hessian(lpp, Vpp, dfpp, d2fpp)) &
+              + 2D0*((a1 .tdotsym. b1) + (a2 .tdotsym. b2) + (a3 .tdotsym. b3))
+    end function ddstressEq_ddstress_yld2004
+
+    pure subroutine principal_derivatives(self, lp, lpp, dfp, dfpp, d2fp, d2fpp, d2fx)
         ! Derivatives of f = (phi/4)**(1/a) with respect to lam'_i and lam''_j (Barlat et al.,
         ! 2005, Eq. 14). With d_ij = lam'_i - lam''_j and h(d) = |d|**a: df/dlam'_i =
-        ! c sum_j h'(d_ij) and df/dlam''_j = -c sum_i h'(d_ij), c = f/(a phi).
-        ! |d_ij|**(a-2) is the only real power per pair: h = p d**2, h' = a p d.
+        ! c sum_j h'(d_ij) and df/dlam''_j = -c sum_i h'(d_ij), c = f/(a phi), and
+        ! d2f/dx dy = c d2phi/dx dy + (1 - a) (df/dx) (df/dy)/f over x, y in (lam', lam''), with
+        ! d2phi/dlam'_i dlam''_j = -h''(d_ij) and the sums of h'' on the diagonal blocks.
+        ! |d_ij|**(a-2) is the only real power per pair: h = p d**2, h' = a p d, h'' = a (a-1) p.
         ! Called by the analytical derivatives.
         implicit none
         class(Yld2004), intent(in) :: self
@@ -117,8 +154,11 @@ contains
         real(real64), intent(in) :: lpp(3)    ! lam''
         real(real64), intent(out) :: dfp(3)   ! df/dlam'_i
         real(real64), intent(out) :: dfpp(3)  ! df/dlam''_j
+        real(real64), intent(out), optional :: d2fp(3,3)   ! d2f/dlam'_i dlam'_k
+        real(real64), intent(out), optional :: d2fpp(3,3)  ! d2f/dlam''_j dlam''_l
+        real(real64), intent(out), optional :: d2fx(3,3)   ! d2f/dlam'_i dlam''_j
 
-        real(real64) :: d(3,3), p(3,3), dh(3,3), phi, f, c
+        real(real64) :: d(3,3), p(3,3), dh(3,3), phi, f, c, g, q
 
         ! d_ij = lam'_i - lam''_j
         d(1,1) = lp(1) - lpp(1)
@@ -162,6 +202,47 @@ contains
         dfpp(1) = -c*(dh(1,1) + dh(2,1) + dh(3,1))
         dfpp(2) = -c*(dh(1,2) + dh(2,2) + dh(3,2))
         dfpp(3) = -c*(dh(1,3) + dh(2,3) + dh(3,3))
+        if (.not. present(d2fp)) return
+
+        ! c h''(d_ij) = q p_ij, stored in p
+        q = c*self%a*(self%a - 1D0)
+        p(1,1) = q*p(1,1)
+        p(1,2) = q*p(1,2)
+        p(1,3) = q*p(1,3)
+        p(2,1) = q*p(2,1)
+        p(2,2) = q*p(2,2)
+        p(2,3) = q*p(2,3)
+        p(3,1) = q*p(3,1)
+        p(3,2) = q*p(3,2)
+        p(3,3) = q*p(3,3)
+        g = (1D0 - self%a)/f
+        d2fp(1,1) = g*dfp(1)*dfp(1) + p(1,1) + p(1,2) + p(1,3)
+        d2fp(2,2) = g*dfp(2)*dfp(2) + p(2,1) + p(2,2) + p(2,3)
+        d2fp(3,3) = g*dfp(3)*dfp(3) + p(3,1) + p(3,2) + p(3,3)
+        d2fp(1,2) = g*dfp(1)*dfp(2)
+        d2fp(1,3) = g*dfp(1)*dfp(3)
+        d2fp(2,3) = g*dfp(2)*dfp(3)
+        d2fp(2,1) = d2fp(1,2)
+        d2fp(3,1) = d2fp(1,3)
+        d2fp(3,2) = d2fp(2,3)
+        d2fpp(1,1) = g*dfpp(1)*dfpp(1) + p(1,1) + p(2,1) + p(3,1)
+        d2fpp(2,2) = g*dfpp(2)*dfpp(2) + p(1,2) + p(2,2) + p(3,2)
+        d2fpp(3,3) = g*dfpp(3)*dfpp(3) + p(1,3) + p(2,3) + p(3,3)
+        d2fpp(1,2) = g*dfpp(1)*dfpp(2)
+        d2fpp(1,3) = g*dfpp(1)*dfpp(3)
+        d2fpp(2,3) = g*dfpp(2)*dfpp(3)
+        d2fpp(2,1) = d2fpp(1,2)
+        d2fpp(3,1) = d2fpp(1,3)
+        d2fpp(3,2) = d2fpp(2,3)
+        d2fx(1,1) = g*dfp(1)*dfpp(1) - p(1,1)
+        d2fx(1,2) = g*dfp(1)*dfpp(2) - p(1,2)
+        d2fx(1,3) = g*dfp(1)*dfpp(3) - p(1,3)
+        d2fx(2,1) = g*dfp(2)*dfpp(1) - p(2,1)
+        d2fx(2,2) = g*dfp(2)*dfpp(2) - p(2,2)
+        d2fx(2,3) = g*dfp(2)*dfpp(3) - p(2,3)
+        d2fx(3,1) = g*dfp(3)*dfpp(1) - p(3,1)
+        d2fx(3,2) = g*dfp(3)*dfpp(2) - p(3,2)
+        d2fx(3,3) = g*dfp(3)*dfpp(3) - p(3,3)
     end subroutine principal_derivatives
 
     pure function normal_block(c12, c13, c21, c23, c31, c32) result(C)
