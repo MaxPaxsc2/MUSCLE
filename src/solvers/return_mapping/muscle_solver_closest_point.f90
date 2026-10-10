@@ -18,6 +18,9 @@ module muscle_solver_closest_point
     integer, parameter, public :: STATUS_ITER_CONVERGED    = 10
     integer, parameter, public :: STATUS_ITER_NONCONVERGED = 11
 
+    ! Relative deviatoric part below which a stress is taken as the apex p*I of a cone criterion
+    real(real64), parameter :: TOL_HYDROSTATIC = 1D-9
+
 
     type, public :: Closest_point
         class(Base_elasticity), allocatable     :: elasticity
@@ -143,6 +146,8 @@ module muscle_solver_closest_point
             real(real64)            :: hard_n, f_trial
             real(real64)            :: dgamma, ddgamma, omega
             integer                 :: i, iter_status, local_status
+            real(real64)            :: d_apex
+            logical                 :: apex_accepted
 
 
            ! *** Step 1: Elastic Trial Check ***
@@ -158,6 +163,17 @@ module muscle_solver_closest_point
                 if (present(status)) status = STATUS_ELASTIC_CASE
                 if (present(iters))  iters  = 0
                 return
+            end if
+
+            ! *** Step 1b: Return to the Apex of a Cone Criterion ***
+            d_apex = self%yield%apex_slope()
+            if (d_apex > 0.0D0) then
+                call closest_point_apex(self, strain, history, d_apex, hard_n, apex_accepted, i)
+                if (apex_accepted) then
+                    if (present(status)) status = STATUS_CONVERGED
+                    if (present(iters))  iters  = i
+                    return
+                end if
             end if
 
             ! *** Step 2: Initialize Candidate State and Relaxation Factor ***
@@ -186,6 +202,75 @@ module muscle_solver_closest_point
             if (present(iters))  iters  = i
         end subroutine closest_point_solve
 
+        pure subroutine closest_point_apex(self, strain, history, d, hard_n, accepted, iters)
+            !! Return to the apex p*I of a cone criterion with slope d (Sysala et al., 2016, Eq. 3.27
+            !! and 3.28, with the yield function of MUSCLE scaled by a = 1/(sqrt(3) f): eta = eta_bar
+            !! = a*d, xi = a, Delta lambda = dgamma/a, K = 1/w): Newton from dgamma = 0 on
+            !! g = d*p - sigma_y(eps_pf_n + dgamma), p = (tr(eps_e_trial) - d*dgamma)/w, w = I:C^-1:I.
+            !! Accepted only if dev(Delta eps_p) flows from the apex (apex_dev_gauge <= dgamma),
+            !! sigma_y' >= 0 and the stress from elasticity%stress is p*I on the yield surface.
+            !! Called by solve; history is written only when accepted.
+            implicit none
+            class(Closest_point), intent(in)              :: self
+            type(ten_3D2Osym), intent(in)                 :: strain   !! Input total strain tensor
+            type(Plastic_material_history), intent(inout) :: history  !! Material history container
+            real(real64), intent(in)                      :: d        !! Slope of the cone (apex_slope)
+            real(real64), intent(in)                      :: hard_n   !! Yield stress at t_n
+            logical, intent(out)                          :: accepted !! Apex return accepted
+            integer, intent(out)                          :: iters    !! Scalar Newton iterations
+
+            real(real64), parameter :: TOL = 1D-5  ! same tolerance as closest_point_iter
+            type(ten_3D2Osym) :: strain_e, cinv_i, dstrain_p, strain_p, stress, eye
+            type(iden_2O)     :: I2O
+            real(real64)      :: w, tr_e, dgamma, hard, dhard, g, p
+            integer           :: i
+
+            accepted = .false.
+            iters    = 0
+            strain_e = strain - history%state_n%strain_p
+            eye      = I2O
+            tr_e     = strain_e .ddot. I2O
+
+            ! w > 0, so tr(eps_e_trial) <= 0 gives g(0) <= 0: no apex, and no inverse is needed
+            if (tr_e <= 0.0D0) return
+
+            ! C^-1 : I and w = I : C^-1 : I (w = 1/K_b for isotropic elasticity)
+            cinv_i = (.inv. self%elasticity%dstress_dstrain(strain_e)) .ddot. eye
+            w      = cinv_i .ddot. I2O
+
+            ! g decreases when sigma_y' >= 0: g(0) <= 0 means no return to the apex
+            dgamma = 0.0D0
+            hard   = hard_n
+            g      = d * tr_e / w - hard
+            if (g <= 0.0D0) return
+
+            do i = 1, self%iter_nw
+                dhard = self%hardening%dstress_dep(history%state_n%strain_pf + dgamma)
+                if (dhard < 0.0D0) return
+                dgamma = dgamma + g / (d * d / w + dhard)
+                hard   = self%hardening%stress(history%state_n%strain_pf + dgamma)
+                g      = d * (tr_e - d * dgamma) / w - hard
+                iters  = i
+                if (abs(g) < TOL) exit
+            end do
+            if (abs(g) >= TOL) return
+
+            ! Delta eps_p = eps_e_trial - p C^-1 : I; its deviatoric part must flow from the apex
+            p         = (tr_e - d * dgamma) / w
+            dstrain_p = strain_e - p * cinv_i
+            if (self%yield%apex_dev_gauge(.dev. dstrain_p) > dgamma) return
+
+            strain_p = history%state_n%strain_p + dstrain_p
+            stress   = self%elasticity%stress(strain - strain_p)
+            if (.not. stress%is_approx(p * eye, tol=TOL_HYDROSTATIC)) return
+            if (abs(self%yield%stress_eq(stress) - hard) >= TOL) return
+
+            history%state_np1%strain_p  = strain_p
+            history%state_np1%strain_pf = history%state_n%strain_pf + dgamma
+            history%state_np1%stress    = stress
+            accepted = .true.
+        end subroutine closest_point_apex
+
 
 
         pure subroutine closest_point_tangent(self, strain, history, tangent)
@@ -200,6 +285,11 @@ module muscle_solver_closest_point
             type(ten_3D2Osym)  :: df, stress, strain_p
             type(ten_3D4O3sym) :: elas_tan, hess, ddf
             real(real64)       :: dhard, dgamma, strain_pf
+            type(ten_3D2Osym)  :: eye
+            type(ten_3D4O3sym) :: apex_tan
+            real(real64)       :: d, w
+            type(iden_2O)      :: I2O
+            type(iden_4O3T)    :: I4O3T
 
             ! 1. Read state variables at t_n+1 from history
             strain_p  = history%state_np1%strain_p
@@ -216,6 +306,20 @@ module muscle_solver_closest_point
             if (dgamma <= 1.0D-12) then
                 tangent = elas_tan
                 return
+            end if
+
+            ! 4b. Apex of a cone criterion: C_ep = sigma_y' / (d**2 + w*sigma_y') I x I, with
+            ! w = I : C^-1 : I (Sysala et al., 2016, Eq. 3.32 with K = 1/w, scaled as in closest_point_apex)
+            d = self%yield%apex_slope()
+            if (d > 0.0D0) then
+                if (stress%is_approx(stress - (.dev. stress), tol=TOL_HYDROSTATIC)) then
+                    dhard    = self%hardening%dstress_dep(strain_pf)
+                    eye      = I2O
+                    w        = ((.inv. elas_tan) .ddot. eye) .ddot. I2O
+                    apex_tan = (dhard / (d * d + w * dhard)) * I4O3T
+                    tangent  = apex_tan
+                    return
+                end if
             end if
 
             ! 5. Compute derivatives at converged stress state
