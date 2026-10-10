@@ -26,6 +26,12 @@ program test_muscle_yield_dp
     call test_DruckerPrager_hessian(passed)
     if (.not. passed) stop 8
 
+    call test_dp_apex_slope(passed)
+    if (.not. passed) stop 9
+
+    call test_dp_apex_dev_gauge(passed)
+    if (.not. passed) stop 10
+
     call test_dp_biaxial_comp_abaqus(passed)
     if (.not. passed) stop 7
 
@@ -645,3 +651,105 @@ subroutine test_DruckerPrager_hessian(passed)
     end if
     print *, "PASS: Hessian on the hydrostatic axis"
 end subroutine test_DruckerPrager_hessian
+
+subroutine test_dp_apex_slope(passed)
+    ! The apex is the hydrostatic singularity of the cone: the slope must match the
+    ! TENSION calibration of d = f*tan(beta) and the value of stress_eq at p = 1.
+    use, intrinsic :: iso_fortran_env, only : real64
+    use muscle_tensors
+    use muscle_yield_druckerprager
+    implicit none
+    logical, intent(out) :: passed
+
+    type(DruckerPrager) :: dp
+    type(ten_3D2Osym) :: stress
+    real(real64) :: res, expected, tanbeta, PI
+    real(real64), parameter :: EPS = 1.0D-12
+
+    PI = acos(-1.0D0)
+    tanbeta = tan(16.0D0 * PI / 180.0D0)
+    expected = tanbeta / (1.0D0 / 0.85D0 + tanbeta / 3.0D0)
+
+    call dp%init(beta_deg=16.0D0, K=0.85D0, hardening_mode=DP_HARDENING_TENSION)
+    call stress%init(xx=1.0D0, yy=1.0D0, zz=1.0D0, xy=0.0D0, yz=0.0D0, xz=0.0D0)
+
+    res = dp%apex_slope()
+    passed = abs(res - expected) < EPS .and. abs(res - dp%stress_eq(stress)) < EPS
+    if (.not. passed) then
+        print *, "FAIL: Apex slope test"
+        print *, "  Expected:", expected
+        print *, "  Got     :", res
+    else
+        print *, "PASS: Apex slope test"
+    end if
+end subroutine test_dp_apex_slope
+
+subroutine test_dp_apex_dev_gauge(passed)
+    ! Gauge of the deviatoric subdifferential at the apex, max over s of (n : s)/t(s), for
+    ! coupled directions n (normals and shears at once). References for K < 1 come from the
+    ! maximization over the full deviatoric space with mpmath (40 digits).
+    use, intrinsic :: iso_fortran_env, only : real64
+    use muscle_tensors
+    use muscle_yield_druckerprager
+    use muscle_yield_vonmises
+    use, intrinsic :: ieee_exceptions
+    implicit none
+    logical, intent(out) :: passed
+
+    type(DruckerPrager) :: dp
+    type(VonMises) :: vm
+    type(ten_3D2Osym) :: n
+    real(real64) :: res, expected
+    logical :: invalid
+    real(real64), parameter :: TOL = 1.0D-10
+
+    ! K = 1, SHEAR (f = 1): circular cone, the gauge is (2/3) q(n)
+    call dp%init(beta_deg=20.0D0, K=1.0D0, hardening_mode=DP_HARDENING_SHEAR)
+    call n%init((/1.81536221119D-3, -1.11120307957D-3, -7.0415913162D-4, &
+                  2.82442330595D-3, 1.21196306882D-3, 2.0174822516D-4/))
+    expected = (2.0D0 / 3.0D0) * vm%stress_eq(n)
+    res = dp%apex_dev_gauge(n)
+    passed = abs(res - expected) < TOL * expected
+    if (.not. passed) then
+        print *, "FAIL: Apex gauge K = 1:", res, expected
+        return
+    end if
+
+    ! K = 0.85, TENSION: Lode angle 0.6 of n, the maximizer is not at the Lode angle of n
+    call dp%init(beta_deg=16.0D0, K=0.85D0, hardening_mode=DP_HARDENING_TENSION)
+    call n%init((/2.02901221125D-4, 4.19317108241D-4, -6.22218329366D-4, &
+                  6.27452450337D-4, 1.99507951108D-3, -1.06702722181D-4/))
+    expected = 3.0469160045314333873D-3
+    res = dp%apex_dev_gauge(n)
+    passed = abs(res - expected) < TOL * expected
+    if (.not. passed) then
+        print *, "FAIL: Apex gauge K = 0.85:", res, expected
+        return
+    end if
+
+    ! K = 0.778 (convexity limit), COMPRESSION: Lode angle 0.003, where an unguarded
+    ! Newton step leaves [0, pi/3]
+    call dp%init(beta_deg=30.0D0, K=0.778D0, hardening_mode=DP_HARDENING_COMPRESSION)
+    call n%init((/1.1019546062D-2, -5.01214440894D-3, -6.00740165306D-3, &
+                  8.19660642397D-3, -2.93972584491D-3, -7.04295564963D-3/))
+    expected = 1.0683686244491726332D-2
+    res = dp%apex_dev_gauge(n)
+    passed = abs(res - expected) < TOL * expected
+    if (.not. passed) then
+        print *, "FAIL: Apex gauge K = 0.778:", res, expected
+        return
+    end if
+
+    ! Zero direction (pure volumetric trial strain): no Lode angle, the gauge is zero and
+    ! no invalid operation (0/0) is raised
+    call n%init((/0.0D0, 0.0D0, 0.0D0, 0.0D0, 0.0D0, 0.0D0/))
+    call ieee_set_flag(ieee_invalid, .false.)
+    res = dp%apex_dev_gauge(n)
+    call ieee_get_flag(ieee_invalid, invalid)
+    passed = abs(res) < TOL .and. .not. invalid
+    if (.not. passed) then
+        print *, "FAIL: Apex gauge of a zero direction:", res
+    else
+        print *, "PASS: Apex gauge test"
+    end if
+end subroutine test_dp_apex_dev_gauge
