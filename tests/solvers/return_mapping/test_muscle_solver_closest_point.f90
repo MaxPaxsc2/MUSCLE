@@ -740,7 +740,8 @@ subroutine test_closest_point_yld2004_tension_shear(passed)
     real(real64), parameter :: EPS = 1.0D-5
     real(real64), parameter :: EPS_PF = 1.0D-7
     real(real64), parameter :: EPS_R = 1.0D-6
-    ! a = 8 with the base-class Hessian: RD tangent misses tangent_numerical by ~5e-7.
+    ! tangent_numerical is itself a finite difference of solves; with a = 8 it is ~5e-7
+    ! from the consistent tangent along RD, also with an exact Hessian.
     real(real64), parameter :: EPS_TAN = 1.0D-6
     logical, intent(out) :: passed
     type(Yld2004) :: yld
