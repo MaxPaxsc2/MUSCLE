@@ -19,6 +19,9 @@ program test_muscle_plastic_history
     call test_fea_array_packing(passed)
     if (.not. passed) stop 2
 
+    call test_fea_slot_mapping(passed)
+    if (.not. passed) stop 3
+
     print*, "Material History Tests PASSED successfully!"
     stop 0
 end program test_muscle_plastic_history
@@ -125,3 +128,84 @@ subroutine test_fea_array_packing(passed)
 
     passed = .TRUE.
 end subroutine test_fea_array_packing
+
+subroutine test_fea_slot_mapping(passed)
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_plastic_history
+    implicit none
+    logical, intent(out) :: passed
+
+    type(Plastic_material_history) :: history
+    type(ten_3D2Osym) :: stress_n, strain_p_n, stress_new, strain_p_new, packed_stress, packed_strain_p
+    real(real64) :: hsv_input(15), hsv_output(15)
+    real(real64), parameter :: EPS = 1.0D-10
+
+    passed = .FALSE.
+
+    ! 1. All 13 slots distinct and nonzero, so unpack cannot swap two of them (yz and xz
+    !    included) unnoticed. Slots 14 and 15 belong to the FE program.
+    hsv_input(1:6)   = (/ 100.0D0, 20.0D0, -10.0D0, 5.0D0, 7.0D0, -3.0D0 /)
+    hsv_input(7:12)  = (/ 0.02D0, -0.011D0, -0.009D0, 0.004D0, -0.006D0, 0.003D0 /)
+    hsv_input(13)    = 0.025D0
+    hsv_input(14:15) = (/ 99.0D0, -99.0D0 /)
+    call stress_n%init(xx=100.0D0, yy=20.0D0, zz=-10.0D0, xy=5.0D0, yz=7.0D0, xz=-3.0D0)
+    call strain_p_n%init(xx=0.02D0, yy=-0.011D0, zz=-0.009D0, xy=0.004D0, yz=-0.006D0, xz=0.003D0)
+
+    call history%unpack_from_fea(hsv_input)
+
+    if (.not. history%state_n%stress%is_approx(stress_n, tol=EPS)) then
+        print*, "FAIL: Unpack stress slots (xx, yy, zz, xy, yz, xz)"
+        return
+    end if
+
+    if (.not. history%state_n%strain_p%is_approx(strain_p_n, tol=EPS)) then
+        print*, "FAIL: Unpack plastic strain slots (xx, yy, zz, xy, yz, xz)"
+        return
+    end if
+
+    ! 2. pack_to_fea writes the candidate state_np1, not state_n, and leaves slots 14-15 as they are.
+    !    Every candidate field differs from state_n and has distinct shears.
+    call stress_new%init(xx=250.0D0, yy=-40.0D0, zz=15.0D0, xy=12.0D0, yz=-8.0D0, xz=6.0D0)
+    call strain_p_new%init(xx=0.05D0, yy=-0.03D0, zz=-0.02D0, xy=0.008D0, yz=-0.007D0, xz=0.009D0)
+    history%state_np1%stress = stress_new
+    history%state_np1%strain_p = strain_p_new
+    history%state_np1%strain_pf = 0.125D0
+    hsv_output = hsv_input
+    call history%pack_to_fea(hsv_output)
+    call packed_stress%init(hsv_output(1:6))
+
+    if (.not. packed_stress%is_approx(stress_new, tol=EPS)) then
+        print*, "FAIL: Pack does not write the candidate stress"
+        return
+    end if
+
+    call packed_strain_p%init(hsv_output(7:12))
+    if (.not. packed_strain_p%is_approx(strain_p_new, tol=EPS) .or. abs(hsv_output(13) - 0.125D0) > EPS) then
+        print*, "FAIL: Pack does not write the candidate plastic strains"
+        return
+    end if
+
+    if (abs(hsv_output(14) - 99.0D0) > EPS .or. abs(hsv_output(15) + 99.0D0) > EPS) then
+        print*, "FAIL: Pack changed slots beyond 13"
+        return
+    end if
+
+    ! 3. Commit and rollback also carry the stress (the existing test checks strains only)
+    call history%commit()
+
+    if (.not. history%state_n%stress%is_approx(stress_new, tol=EPS)) then
+        print*, "FAIL: Commit failed to promote the stress"
+        return
+    end if
+
+    history%state_np1%stress = stress_n
+    call history%rollback()
+
+    if (.not. history%state_np1%stress%is_approx(stress_new, tol=EPS)) then
+        print*, "FAIL: Rollback failed to restore the stress"
+        return
+    end if
+
+    passed = .TRUE.
+end subroutine test_fea_slot_mapping
