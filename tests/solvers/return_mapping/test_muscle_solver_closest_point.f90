@@ -23,6 +23,9 @@ program test_muscle_solver_closest_point
     call test_closest_point_hill48_tension_shear(passed)
     if (.not. passed) STOP 7
 
+    call test_closest_point_cpb06_tension_compression_shear(passed)
+    if (.not. passed) STOP 8
+
     call test_closest_point_yld2004_tension_shear(passed)
     if (.not. passed) STOP 9
 
@@ -719,6 +722,191 @@ contains
     end subroutine check_step
 
 end subroutine test_closest_point_hill48_tension_shear
+
+subroutine test_closest_point_cpb06_tension_compression_shear(passed)
+    ! One virgin step of CPB06 (Cazacu et al., 2006, Eqs. 8, 9, 12), called by the program.
+    ! Ti-6Al-4V: Tuninetti et al. (2013), Table 2, Wp = 1.857, with the published signs.
+    ! Expected stress, strain and flow: independent mpmath (50 digits), ep = 0.05;
+    ! these constants are not taken from the solver. Elasticity and Swift match Hill48.
+    use muscle_tensors
+    use, intrinsic :: iso_fortran_env, only : real64
+    use muscle_hard_swift, only : Swift_hardening
+    use muscle_yield_cpb06, only : CPB06
+    use muscle_elasticity_linear, only : Elasticity_linear
+    use muscle_plastic_history, only : Plastic_material_history
+    use muscle_solver_closest_point, only : Closest_point, STATUS_CONVERGED
+    implicit none
+
+    real(real64), parameter :: EPS = 1.0D-5
+    real(real64), parameter :: EPS_PF = 1.0D-7
+    real(real64), parameter :: EPS_R = 1.0D-6
+    ! Base-class finite-difference Hessian: measured tangent error <= 4.7e-7 in these states.
+    real(real64), parameter :: EPS_TAN = 1.0D-6
+    logical, intent(out) :: passed
+    type(CPB06) :: cpb
+    type(Swift_hardening) :: sw
+    type(Elasticity_linear) :: elas
+    real(real64) :: tension_rd, compression_rd ! Returned axial stresses at equal ep
+
+    call cpb%init(c11=1.000D0, c12=-2.373D0, c13=-2.364D0, &
+                  c21=-2.373D0, c22=-1.838D0, c23=1.196D0, &
+                  c31=-2.364D0, c32=1.196D0, c33=-2.444D0, &
+                  c44=3.607D0, c55=3.607D0, c66=3.607D0, k=-0.136D0, a=2.0D0)
+    call elas%set_parameters(young=1000.0D0, poisson=0.3D0)
+    sw = Swift_hardening(k=100.0D0, n=0.1D0, e0=1.0D-4)
+
+    ! 45 deg first couples the normal block and tensorial xy shear; width uses eps_p,xy.
+    call check_step(passed, "T45", &
+        (/ 3.8898652987499279D+1, 3.8898652987499279D+1, 0.0D0, &
+           3.8898652987499279D+1, 0.0D0, 0.0D0 /), &
+        (/ 4.0462515232691419D-2, 3.4075333101596706D-2, -4.3418925944288702D-2, &
+           8.8170297775968199D-2, 0.0D0, 0.0D0 /), &
+        (/ 1.3233458141441924D-2, 6.8462760103472110D-3, -2.0079734151789135D-2, &
+           3.7602048892219136D-2, 0.0D0, 0.0D0 /), &
+        theta_deg=45.0D0, r_in=1.3726367893107158D+0, with_tangent=.true.)
+    if (.not. passed) return
+
+    ! RD isolates normal anisotropy; r0 is eps_p,yy / eps_p,zz.
+    call check_step(passed, "T0", &
+        (/ 7.4128254276130228D+1, 0.0D0, 0.0D0, &
+           0.0D0, 0.0D0, 0.0D0 /), &
+        (/ 1.2412825427613023D-1, -4.7462244167369144D-2, -4.7014708398308993D-2, &
+           0.0D0, 0.0D0, 0.0D0 /), &
+        (/ 5.0000000000000000D-2, -2.5223767884530076D-2, -2.4776232115469924D-2, &
+           0.0D0, 0.0D0, 0.0D0 /), &
+        theta_deg=0.0D0, r_in=1.0180631085055389D+0, stress_rd=tension_rd, &
+        with_tangent=.true.)
+    if (.not. passed) return
+
+    ! RD compression reverses the principal values and exercises the nonzero k.
+    call check_step(passed, "C0", &
+        (/ -7.8641758456969284D+1, 0.0D0, 0.0D0, &
+           0.0D0, 0.0D0, 0.0D0 /), &
+        (/ -1.2577209717942503D-1, 4.7478775498358532D-2, 4.6836618298278789D-2, &
+           0.0D0, 0.0D0, 0.0D0 /), &
+        (/ -4.7130338722455750D-2, 2.3886247961267747D-2, 2.3244090761188003D-2, &
+           0.0D0, 0.0D0, 0.0D0 /), stress_rd=compression_rd, with_tangent=.true.)
+    if (.not. passed) return
+
+    ! At equal ep, sigma_T/abs(sigma_C) = k_C/k_T; k = 0 would give one.
+    passed = abs(tension_rd/abs(compression_rd) - 9.4260677444911500D-1) < EPS_R
+    if (.not. passed) print *, "CPB06 asymmetry", tension_rd, compression_rd
+    if (.not. passed) return
+
+    ! Test variant for the shears: library c44/c55/c66 = xy/yz/xz (paper c66/c44/c55),
+    ! all distinct. The normal block, and so B, is unchanged.
+    call cpb%init(c11=1.000D0, c12=-2.373D0, c13=-2.364D0, &
+                  c21=-2.373D0, c22=-1.838D0, c23=1.196D0, &
+                  c31=-2.364D0, c32=1.196D0, c33=-2.444D0, &
+                  c44=3.607D0, c55=2.900D0, c66=4.100D0, k=-0.136D0, a=2.0D0)
+
+    ! Distinct shear coefficients detect a swapped slot or an engineering factor 2.
+    call check_step(passed, "xy", &
+        (/ 0.0D0, 0.0D0, 0.0D0, &
+           4.2980297569717324D+1, 0.0D0, 0.0D0 /), &
+        (/ 2.8018662612699186D-3, -6.2581752687156823D-3, 3.4563090074457636D-3, &
+           9.8991965398510431D-2, 0.0D0, 0.0D0 /), &
+        (/ 2.8018662612699186D-3, -6.2581752687156823D-3, 3.4563090074457636D-3, &
+           4.3117578557877909D-2, 0.0D0, 0.0D0 /), with_tangent=.false.)
+    if (.not. passed) return
+
+    ! The yz shear isolates c55; its normal plastic flow must also be retained.
+    call check_step(passed, "yz", &
+        (/ 0.0D0, 0.0D0, 0.0D0, &
+           0.0D0, 5.3458597701369099D+1, 0.0D0 /), &
+        (/ -8.0703964016221279D-3, 5.0024965036953617D-3, 3.0678998979267662D-3, &
+           0.0D0, 1.0416237546419068D-1, 0.0D0 /), &
+        (/ -8.0703964016221279D-3, 5.0024965036953617D-3, 3.0678998979267662D-3, &
+           0.0D0, 3.4666198452410850D-2, 0.0D0 /), with_tangent=.false.)
+    if (.not. passed) return
+
+    ! The xz shear isolates c66; its normal plastic flow must also be retained.
+    call check_step(passed, "xz", &
+        (/ 0.0D0, 0.0D0, 0.0D0, &
+           0.0D0, 0.0D0, 3.7812178861943997D+1 /), &
+        (/ 3.4658862183654102D-3, 4.0628656990233761D-3, -7.5287519173887863D-3, &
+           0.0D0, 0.0D0, 9.8166664815314950D-2 /), &
+        (/ 3.4658862183654102D-3, 4.0628656990233761D-3, -7.5287519173887863D-3, &
+           0.0D0, 0.0D0, 4.9010832294787754D-2 /), with_tangent=.false.)
+
+contains
+
+    ! Resolve one prescribed CPB06 state and compare its associated flow (2006, Eq. 9).
+    ! Called by test_closest_point_cpb06_tension_compression_shear; tag labels the loading.
+    subroutine check_step(ok, tag, stress_values, strain_values, plastic_values, theta_deg, r_in, stress_rd, &
+                          with_tangent)
+        implicit none
+        logical, intent(out) :: ok
+        character(len=*), intent(in) :: tag
+        real(real64), intent(in) :: stress_values(6), strain_values(6), plastic_values(6)
+        real(real64), intent(in), optional :: theta_deg, r_in
+        real(real64), intent(out), optional :: stress_rd
+        logical, intent(in) :: with_tangent
+        type(Plastic_material_history) :: history
+        type(Closest_point) :: solver
+        type(ten_3D2Osym) :: strain, strain_p0, strain_p, stress, expected_stress, expected_plastic
+        type(ten_3D2Osym) :: width_projection ! t (x) t, transverse to the loading axis
+        type(ten_3D4O2sym) :: tangent, numerical_tangent
+        real(real64) :: strain_pf, th, sn, cs, r_theta
+        integer :: status, iters
+
+        call strain%init(strain_values)
+        call expected_stress%init(stress_values)
+        call expected_plastic%init(plastic_values)
+        call strain_p0%init(xx=0.0D0, yy=0.0D0, zz=0.0D0, xy=0.0D0, yz=0.0D0, xz=0.0D0)
+        call history%init(strain_p=strain_p0, strain_pf=0.0D0)
+        call solver%init(elasticity=elas, hardening=sw, yield=cpb)
+        call solver%solve(strain=strain, history=history, status=status, iters=iters)
+
+        ! Every prescribed step is plastic and must converge.
+        ok = status == STATUS_CONVERGED
+        if (.not. ok) print *, "CPB06 status", tag, status
+        if (.not. ok) return
+        stress = history%state_np1%stress
+        strain_p = history%state_np1%strain_p
+        strain_pf = history%state_np1%strain_pf
+        if (present(stress_rd)) stress_rd = stress%xx()
+
+        ! The final stress must satisfy the independent directional yield strength.
+        ok = stress%is_approx(expected_stress, tol=EPS)
+        if (.not. ok) print *, "CPB06 stress", tag, stress%vals
+        if (.not. ok) return
+        ! Homogeneity makes the plastic multiplier equal to the prescribed ep.
+        ok = abs(strain_pf - 0.05D0) < EPS_PF
+        if (.not. ok) print *, "CPB06 strain_pf", tag, strain_pf
+        if (.not. ok) return
+        ! Associated flow includes normal components even for pure shear stress.
+        ok = strain_p%is_approx(expected_plastic, tol=EPS)
+        if (.not. ok) print *, "CPB06 strain_p", tag, strain_p%vals
+        if (.not. ok) return
+        ! Same bound as Hill48: all selected states converge within six iterations.
+        ok = iters .le. 6
+        if (.not. ok) print *, "CPB06 iterations", tag, iters, "status", status
+        if (.not. ok) return
+
+        ! Pure shear: Sigma has a zero eigenvalue with k /= 0; unequal lateral second
+        ! derivatives make the tangent nonunique, so only the uniaxial states check it.
+        if (with_tangent) then
+            call solver%tangent_numerical(strain=strain, history=history, tangent=numerical_tangent)
+            call solver%tangent(strain=strain, history=history, tangent=tangent)
+            ok = tangent%is_approx(numerical_tangent, tol=EPS_TAN)
+            if (.not. ok) print *, "CPB06 tangent", tag
+            if (.not. ok) return
+        end if
+        if (present(theta_deg) .and. present(r_in)) then
+            ! Width/thickness checks r from the independent gradient, including xy at 45 deg.
+            th = theta_deg*acos(-1.0D0)/180.0D0
+            sn = sin(th)
+            cs = cos(th)
+            call width_projection%init(xx=sn*sn, yy=cs*cs, zz=0.0D0, &
+                                       xy=-sn*cs, yz=0.0D0, xz=0.0D0)
+            r_theta = (width_projection .ddot. strain_p)/strain_p%zz()
+            ok = abs(r_theta - r_in) < EPS_R
+            if (.not. ok) print *, "CPB06 r", tag, r_theta, r_in
+        end if
+    end subroutine check_step
+
+end subroutine test_closest_point_cpb06_tension_compression_shear
 
 subroutine test_closest_point_yld2004_tension_shear(passed)
     ! Yld2004-18p, AA2090-T3, a = 8 (Barlat et al., 2005, Table 2, Eqs. 14 and 15).
