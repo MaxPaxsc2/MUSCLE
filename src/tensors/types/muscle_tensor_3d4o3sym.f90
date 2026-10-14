@@ -330,7 +330,9 @@ contains
 
     pure function inv_3D4O3sym(a) result(res)
         !! `.inv.` Computes the inverse of a ten_3D4O3sym tensor.
-        !! Reconstructs the 6x6 symmetric Voigt matrix, inverts it using `M66INV`,
+        !! Reconstructs the 6x6 symmetric Voigt matrix, inverts it using `M66INV`
+        !! (LU with partial pivoting in plain Fortran), symmetrizes the result (the inverse
+        !! is exactly symmetric only up to round-off, and a single triangle is stored),
         !! and extracts the 21 independent components of the inverse, applying
         !! scaling factors (1/2, 1/4) to the off-diagonal Voigt components of the
         !! resulting inverse matrix before storing them. This ensures consistency
@@ -351,20 +353,8 @@ contains
                            v(21), v(20), v(18), v(15), v(11),  v(6)  &
                         /), (/6,6/))
 
-        call M66INV2(mat_a, mat_b, ok)
-
-
-        ! call FINDInv(mat_a, mat_b, 6, iok)
-
-        ! v = (/ mat_b(1,1), mat_b(2,2), mat_b(3,3), mat_b(4,4), mat_b(5,5), mat_b(6,6),  &
-        !        mat_b(1,2), mat_b(2,3), mat_b(3,4), mat_b(4,5), mat_b(5,6),              &
-        !        mat_b(1,3), mat_b(2,4), mat_b(3,5), mat_b(4,6),                          &
-        !        mat_b(1,4), mat_b(2,5), mat_b(3,6),                                      &
-        !        mat_b(1,5), mat_b(2,6),                                                  &
-        !        mat_b(1,6)                                                               &
-        !       /)
-
-        ! TODO: Add error handling if 'ok' is .false. or iok indicates failure
+        call M66INV(mat_a, mat_b, ok)
+        mat_b = 0.5D0*(mat_b + transpose(mat_b))
 
         ! Extract the 21 components of the inverse matrix (mat_b)
         ! Apply scaling factors to off-diagonal Voigt components of the inverse
@@ -381,17 +371,6 @@ contains
                mat_b(1,6)/2D0                                                               &
               /)
 
-
-        ! mat_a = reshape((/  v(1),  v(7), v(12), v(16), v(19), v(21), &
-        !                     v(7),  v(2),  v(8), v(13), v(17), v(20), &
-        !                     v(12),  v(8),  v(3),  v(9), v(14), v(18), & 
-        !                     v(16), v(13),  v(9),  v(4), v(10), v(15), &
-        !                     v(19), v(17), v(14), v(10),  v(5), v(11), &
-        !                     v(21), v(20), v(18), v(15), v(11),  v(6)  &
-        !                     /), (/6,6/))
-        ! call M66INV(mat_a, mat_b, ok)
-        ! call FINDInv(mat_a, mat_b, 6, iok)
-        
         call res%init(v)
         
             !

@@ -330,7 +330,7 @@ contains
         !! to ensure consistency with tensor operations like the double dot product
         !! when using Voigt notation where shear strains/stresses might be represented
         !! differently (e.g., tensorial vs engineering).
-        !! Requires an external `M66INV` routine for 6x6 matrix inversion
+        !! The 6x6 matrix is inverted with `M66INV` (LU with partial pivoting in plain Fortran).
         use, intrinsic :: iso_fortran_env
         use muscle_math_inverses
         implicit none
@@ -340,7 +340,7 @@ contains
         logical :: ok
         mat_a = a%vals
 
-        call M66INV2(mat_a, mat_b, ok)
+        call M66INV(mat_a, mat_b, ok)
         ! TODO: Add error handling if 'ok' is .false.
 
         ! Apply scaling factors for consistency with Voigt operations

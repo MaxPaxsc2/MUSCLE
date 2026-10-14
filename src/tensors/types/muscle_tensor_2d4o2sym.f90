@@ -304,7 +304,7 @@ contains
         !! `.inv.` Computes the inverse of a ten_2D4O2sym tensor, i.e. \(\mathbb{A}^{-1}\) such that
         !! \(\mathbb{A}^{-1} : \mathbb{A} = \mathbb{A} : \mathbb{A}^{-1} = \mathbb{I}^S\).
         !!
-        !! The 4x4 Voigt matrix is inverted with `M44INV` (LAPACK LU) and the shear
+        !! The 4x4 Voigt matrix is inverted with `M44INV` (adjugate with LU fallback) and the shear
         !! row/column are scaled by 1/2 (shear-shear term by 1/4) to stay consistent
         !! with the tensorial-shear convention of `.ddot.` (same scheme as `inv_3D4O2sym`).
         !! A zero tensor is returned if the matrix is singular.

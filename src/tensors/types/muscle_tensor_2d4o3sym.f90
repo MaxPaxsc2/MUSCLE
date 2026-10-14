@@ -374,7 +374,9 @@ contains
         !! \(\mathbb{A}^{-1}\) such that \(\mathbb{A}^{-1} : \mathbb{A} = \mathbb{I}^S\).
         !!
         !! Reconstructs the 4x4 symmetric Voigt matrix, inverts it with `M44INV`
-        !! (LAPACK LU) and extracts the 10 independent components of the inverse,
+        !! (adjugate with LU fallback), symmetrizes the result (the inverse is exactly
+        !! symmetric only up to round-off, and a single triangle is stored) and extracts the
+        !! 10 independent components of the inverse,
         !! scaling the shear row/column by 1/2 and the shear-shear term by 1/4.
         !! This keeps the result consistent with the tensorial-shear Voigt convention
         !! used by `.ddot.` (same scheme as `inv_3D4O3sym`).
@@ -395,6 +397,7 @@ contains
                         /), (/4,4/))
 
         call M44INV(mat_a, mat_b, ok)
+        mat_b = 0.5D0*(mat_b + transpose(mat_b))
 
         v = (/ mat_b(1,1), mat_b(2,2), mat_b(3,3), mat_b(4,4)/4D0, &
                mat_b(1,2), mat_b(2,3), mat_b(3,4)/2D0,             &
