@@ -77,6 +77,7 @@ module muscle_tensors
     !! - [[ten_3D2Osym]]:    Symmetric 3D second-order tensor (from [[muscle_tensor_3d2osym]]).
     !! - [[ten_3D4O2sym]]:   3D fourth-order tensor with minor symmetries (from [[muscle_tensor_3d4o2sym]]).
     !! - [[ten_3D4O3sym]]:   3D fourth-order tensor with major and minor symmetries (from [[muscle_tensor_3d4o3sym]]).
+    !! - [[ten_3D4O]]:       General (unsymmetric) 3D fourth-order tensor, 9x9 matrix (from [[muscle_tensor_3d4o]]).
     !! - [[ten_2D2O]]:       General 2D second-order tensor (from [[muscle_tensor_2d2o]]).
     !! - [[ten_2D2Osym]]:    Symmetric 2D second-order tensor (from [[muscle_tensor_2d2osym]]).
     !! - [[ten_2D4O2sym]]:   2D fourth-order tensor with minor symmetries (from [[muscle_tensor_2d4o2sym]]).
@@ -148,6 +149,7 @@ module muscle_tensors
     use muscle_tensor_2d4o2sym
     use muscle_tensor_2d4o
     use muscle_tensor_3d4o2sym
+    use muscle_tensor_3d4o
     use muscle_tensor_iden_2os
     use muscle_tensor_iden_2o
     use muscle_tensor_iden_4o3ts
@@ -171,6 +173,7 @@ module muscle_tensors
     public :: ten_2D4O2sym
     public :: ten_2D4O
     public :: ten_3D4O2sym
+    public :: ten_3D4O
     public :: iden_2OS
     public :: iden_2O
     public :: iden_4O3TS
