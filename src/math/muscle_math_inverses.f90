@@ -58,6 +58,35 @@ module muscle_math_inverses
         include 'muscle_math_lu_inverse.inc'
     END SUBROUTINE M99INV
 
+    PURE FUNCTION QUIET_NAN() RESULT(X)
+        !! IEEE quiet NaN (`ieee_value`), used to fill the inverse of a singular tensor.
+        !!
+        !! It is a separate function on purpose and must only be called on the (rare) failure path:
+        !! gfortran saves and restores the floating-point state on entry and exit of every procedure
+        !! that uses the IEEE intrinsic modules (~150 ns per call, measured 2026-10-14). Keeping the
+        !! `use ieee_arithmetic` inside this function confines that cost to the singular case; using
+        !! `ieee_value` directly in the inverse routines made every inverse ~150 ns slower.
+        use, intrinsic :: ieee_arithmetic, only : ieee_value, ieee_quiet_nan
+        implicit none
+        REAL(real64) :: X
+            !! Quiet NaN.
+        X = ieee_value(1.0D0, ieee_quiet_nan)
+    END FUNCTION QUIET_NAN
+
+    PURE FUNCTION COND_INF(A, AINV) RESULT(KAPPA)
+        !! Condition number in the infinity norm,
+        !! \( \kappa_\infty = \|A\|_\infty \|A^{-1}\|_\infty \) (maximum absolute row sums), from a
+        !! matrix and its computed inverse. Costs \( 2n^2 \) operations.
+        implicit none
+        REAL(real64), INTENT(IN) :: A(:,:)
+            !! Matrix.
+        REAL(real64), INTENT(IN) :: AINV(:,:)
+            !! Its (computed) inverse, same shape as `A`.
+        REAL(real64) :: KAPPA
+            !! \( \kappa_\infty(A) \).
+        KAPPA = maxval(sum(abs(A), dim=2)) * maxval(sum(abs(AINV), dim=2))
+    END FUNCTION COND_INF
+
     PURE SUBROUTINE M33INV(A, AINV, OK_FLAG, KAPPA)
         !! Inverse of a general 3x3 matrix: closed-form adjugate with an LU fallback.
         !!

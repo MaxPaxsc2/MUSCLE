@@ -104,7 +104,8 @@ module muscle_tensors
     !! - `.dev.`: Deviatoric part of a second-order tensor.
     !! - `.ddot.`: Double dot product (e.g., `tensor4 : tensor2`, `tensor2 : tensor2`).
     !! - `.tdot.`: Tensor dot product (specific definition depends on implementation, often \( (A \otimes B)_{ijkl} = A_{ij} B_{kl} \) for second order).
-    !! - `.inv.`: Inverse of a tensor (2nd-order symmetric, 4th-order fully symmetric or general 4th order; 2D and 3D).
+    !! - `.inv.`: Inverse of a tensor (every `ten_*` type, also as the method `%inv()`); quiet NaN if singular.
+    !! - `inverse`: `call inverse(a, a_inv, ok [, cond])`, inverse with a success flag and the condition number.
     !! - `.tdotsym.`: Symmetrized dyadic product \( \frac{1}{2}(\mathbf{a}\otimes\mathbf{b} + \mathbf{b}\otimes\mathbf{a}) \).
     !! - `.transform.`: Congruence transformation \( \mathbf{F}\cdot\mathbf{S}\cdot\mathbf{F}^T \) (2nd and 4th order).
     !! - `transpose`: Transpose of a general second-order tensor.
@@ -196,6 +197,7 @@ module muscle_tensors
     public :: operator(.tdot.)
     public :: operator(.tdotsym.)
     public :: operator(.inv.)
+    public :: inverse
     public :: operator(.transform.)
 
     public :: transpose

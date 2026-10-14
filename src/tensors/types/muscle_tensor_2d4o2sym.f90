@@ -106,6 +106,8 @@ module muscle_tensor_2d4o2sym
                 !! L1 norm of the 4x4 Voigt matrix.
             procedure, public :: convert_3sym
                 !! Projects onto a fully symmetric `ten_2D4O3sym` (upper triangle).
+            procedure, public :: inv => inv_2D4O2sym
+                !! Inverse tensor (quiet NaN if singular).
     end type ten_2D4O2sym
 
     public :: operator(.approx.)
@@ -139,6 +141,12 @@ module muscle_tensor_2d4o2sym
     interface operator ( / )
         module procedure div_2D4O2sym_real64
     end interface
+    public :: inverse
+    interface inverse
+        !! `call inverse(a, a_inv, ok [, cond])`: inverse with a success flag and condition number.
+        module procedure inverse_2D4O2sym
+    end interface
+
 contains
 
     pure subroutine init_ten_2D4O2sym(self, vals)
@@ -300,30 +308,52 @@ contains
         res%vals = b%vals/a
     end function div_2D4O2sym_real64
 
-    pure function inv_2D4O2sym(a) result(res)
-        !! `.inv.` Computes the inverse of a ten_2D4O2sym tensor, i.e. \(\mathbb{A}^{-1}\) such that
-        !! \(\mathbb{A}^{-1} : \mathbb{A} = \mathbb{A} : \mathbb{A}^{-1} = \mathbb{I}^S\).
+    pure subroutine inverse_2D4O2sym(a, a_inv, ok, cond)
+        !! Inverse of a `ten_2D4O2sym` with a success flag (generic `inverse`, also used by `.inv.` and
+        !! `%inv()`).
         !!
-        !! The 4x4 Voigt matrix is inverted with `M44INV` (adjugate with LU fallback) and the shear
-        !! row/column are scaled by 1/2 (shear-shear term by 1/4) to stay consistent
-        !! with the tensorial-shear convention of `.ddot.` (same scheme as `inv_3D4O2sym`).
-        !! A zero tensor is returned if the matrix is singular.
-        use muscle_math_inverses, only : M44INV
+        !! \( \mathbb{A}^{-1} : \mathbb{A} = \mathbb{A} : \mathbb{A}^{-1} = \mathbb{I}^S \). The 4x4 Voigt
+        !! matrix is inverted with `M44INV` (adjugate + \( \kappa_\infty \), LU fallback) and the shear
+        !! row/column are scaled by 1/2 (shear-shear term by 1/4) to stay consistent with the
+        !! tensorial-shear convention of `.ddot.`.
+        !!
+        !! If the matrix is singular (or contains NaN): `ok = .false.`, `a_inv` is filled with quiet
+        !! NaN and `cond = huge(1.0D0)`.
+        use muscle_math_inverses, only : M44INV, QUIET_NAN
         implicit none
-        type(ten_2D4O2sym), intent(in) :: a
+        class(ten_2D4O2sym), intent(in) :: a
+            !! Tensor to invert.
+        type(ten_2D4O2sym), intent(out) :: a_inv
+            !! Inverse tensor (quiet NaN if `a` is singular).
+        logical, intent(out) :: ok
+            !! `.true.` if the inversion succeeded, `.false.` if `a` is singular.
+        real(real64), intent(out), optional :: cond
+            !! Condition number \( \kappa_\infty \) of the stored Voigt matrix that is inverted; `huge(1.0D0)` if singular.
+        real(real64) :: x(4,4), kap
+
+        call M44INV(a%vals, x, ok, kap)
+        if (.not. ok) then
+            a_inv%vals = QUIET_NAN()
+            if (present(cond)) cond = huge(1.0D0)
+            return
+        end if
+        x(1:3, 4) = x(1:3, 4)/2D0
+        x(4, 1:3) = x(4, 1:3)/2D0
+        x(4, 4)   = x(4, 4)/4D0
+        a_inv%vals = x
+        if (present(cond)) cond = kap
+    end subroutine inverse_2D4O2sym
+
+    pure function inv_2D4O2sym(self) result(res)
+        !! `.inv.` and `%inv()`: inverse of a `ten_2D4O2sym`; quiet NaN if it is singular (use the
+        !! generic `inverse` to get a success flag and the condition number).
+        implicit none
+        class(ten_2D4O2sym), intent(in) :: self
             !! Tensor to invert.
         type(ten_2D4O2sym) :: res
             !! Inverse tensor.
-        real(real64) :: mat_b(4,4)
         logical :: ok
-
-        call M44INV(a%vals, mat_b, ok)
-
-        mat_b(1:3, 4) = mat_b(1:3, 4)/2D0
-        mat_b(4, 1:3) = mat_b(4, 1:3)/2D0
-        mat_b(4, 4)   = mat_b(4, 4)/4D0
-
-        call res%init(mat_b)
+        call inverse_2D4O2sym(self, res, ok)
     end function inv_2D4O2sym
 
     pure function convert_3sym(self) result(res)
