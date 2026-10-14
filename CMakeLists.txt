@@ -30,6 +30,12 @@ find_package(LAPACK REQUIRED)
 add_subdirectory(src)
 add_subdirectory(tests)
 
+# Benchmarks (optional, not part of the test suite)
+option(MUSCLE_BUILD_BENCHMARKS "Build the performance benchmarks in benchmarks/" OFF)
+if(MUSCLE_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
+endif()
+
 
 # Solo configurar el reporte si estamos en el modo de cobertura
 if(CMAKE_BUILD_TYPE STREQUAL "Profile_unittests")
