@@ -78,6 +78,7 @@ module muscle_test_utils
         module procedure check_3D2O
         module procedure check_3D4O2sym
         module procedure check_3D4O3sym
+        module procedure check_3D4O
     end interface check_approx
 
 contains
@@ -349,6 +350,26 @@ contains
         call report(passed, label // ' [ten_3D4O3sym]', got%is_approx(expected, tol=t), &
                     got%vals, expected%vals, N3D4O3, t)
     end subroutine check_3D4O3sym
+
+    subroutine check_3D4O(passed, label, got, expected, tol)
+        !! Compares two `ten_3D4O` (verdict: `is_approx`). Components are labelled `ij:kl`
+        !! following the 9x9 storage (row \( 3(j-1)+i \), column \( 3(l-1)+k \)).
+        logical, intent(inout) :: passed
+            !! Accumulated test result.
+        character(len=*), intent(in) :: label
+            !! Operation under test.
+        type(ten_3D4O), intent(in) :: got
+            !! Obtained tensor.
+        type(ten_3D4O), intent(in) :: expected
+            !! Expected tensor.
+        real(real64), optional, intent(in) :: tol
+            !! Relative tolerance (default: that of `.approx.`, `1E-12`).
+        real(real64) :: t
+        t = DEFAULT_TOL
+        if (present(tol)) t = tol
+        call report(passed, label // ' [ten_3D4O]', got%is_approx(expected, tol=t), &
+                    reshape(got%vals, [81]), reshape(expected%vals, [81]), pair_names(N3GEN), t)
+    end subroutine check_3D4O
 
     ! -------------------------------------------------------------------------
     ! Private helpers
