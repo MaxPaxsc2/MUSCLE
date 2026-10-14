@@ -37,6 +37,9 @@ program test_muscle_tensor_2d4o3sym
     call test_ten_2D4O3sym_ddot_4O(passed)
     if (.not. passed) STOP 11
 
+    call test_ten_2D4O3sym_transform(passed)
+    if (.not. passed) STOP 12
+
     STOP 0
 end program test_muscle_tensor_2d4o3sym
 
@@ -448,3 +451,38 @@ subroutine test_ten_2D4O3sym_ddot_4O(passed)
     call check_approx(passed, "2D4O2sym .ddot. 2D2Osym", a_full .ddot. x, a .ddot. x)
     call check_approx(passed, "2D2Osym .ddot. 2D4O2sym", x .ddot. a_full, x .ddot. a)
 end subroutine test_ten_2D4O3sym_ddot_4O
+
+
+subroutine test_ten_2D4O3sym_transform(passed)
+    !! `.transform.` of a fully symmetric 2D tensor:
+    !! - analytic invariant: the isotropic tensor lambda I(x)I + 2 mu I^S (Voigt: normal block
+    !!   lambda + 2 mu / lambda, xyxy = mu) is unchanged by an in-plane rotation of 0.7 rad
+    !!   (A = [[c, -s], [s, c]], A_zz = 1). Round-off ~1e-15 relative; tol 1e-13.
+    !! - analytic, diagonal A = diag(2, 3, 0.5): R_ab = s_a s_b C_ab with
+    !!   s = (a_1^2, a_2^2, a_3^2, a_1 a_2). Exact products of small numbers; tol 1e-14.
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_test_utils
+    implicit none
+    logical, intent(out) :: passed
+    type(ten_2D2O) :: A
+    type(ten_2D4O3sym) :: C, expected
+    real(real64), parameter :: LAMBDA = 121.15D0, MU = 80.77D0, THETA = 0.7D0
+    real(real64) :: sc(4)
+
+    passed = .true.
+    call C%init(xxxx=LAMBDA + 2D0*MU, yyyy=LAMBDA + 2D0*MU, zzzz=LAMBDA + 2D0*MU, xyxy=MU, &
+                xxyy=LAMBDA, yyzz=LAMBDA, zzxy=0D0, xxzz=LAMBDA, yyxy=0D0, xxxy=0D0)
+    call A%init(xx=cos(THETA), xy=-sin(THETA), yx=sin(THETA), yy=cos(THETA), zz=1D0)
+    call check_approx(passed, "R(0.7) .transform. C_iso = C_iso", A .transform. C, C, tol=1D-13)
+
+    ! Storage (11,22,33,44,12,23,34,13,24,14) -> scale s_a s_b of each (a,b)
+    call C%init((/1D0, 2D0, 3D0, 4D0, 5D0, 6D0, 7D0, 8D0, 9D0, 10D0/))
+    call A%init(xx=2D0, xy=0D0, yx=0D0, yy=3D0, zz=0.5D0)
+    sc = (/4D0, 9D0, 0.25D0, 6D0/)
+    call expected%init((/ sc(1)*sc(1)*1D0, sc(2)*sc(2)*2D0, sc(3)*sc(3)*3D0, sc(4)*sc(4)*4D0, &
+                          sc(1)*sc(2)*5D0, sc(2)*sc(3)*6D0, sc(3)*sc(4)*7D0,                 &
+                          sc(1)*sc(3)*8D0, sc(2)*sc(4)*9D0,                                  &
+                          sc(1)*sc(4)*10D0 /))
+    call check_approx(passed, "diag(2,3,0.5) .transform. C", A .transform. C, expected, tol=1D-14)
+end subroutine test_ten_2D4O3sym_transform

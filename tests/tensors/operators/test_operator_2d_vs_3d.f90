@@ -281,6 +281,12 @@ contains
         r42 = g2 .transform. D1; r342 = G3b .transform. D3
         call check_approx(ok, "2D2O .transform. 2D4O2sym (A = g2)", r42, p42(r342), tol=TOL)
 
+        ! Fully symmetric input: result must stay fully symmetric and match 3D
+        r43 = g1 .transform. C1; r343 = G3a .transform. C3a
+        call check_approx(ok, "2D2O .transform. 2D4O3sym", r43, p43(r343), tol=TOL)
+        r43 = g2 .transform. C1; r343 = G3b .transform. C3a
+        call check_approx(ok, "2D2O .transform. 2D4O3sym (A = g2)", r43, p43(r343), tol=TOL)
+
         call transform_rotation_analytic()
     end subroutine fourth_order
 
