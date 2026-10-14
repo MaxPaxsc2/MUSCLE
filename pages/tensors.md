@@ -53,10 +53,22 @@ type(ten_3D4O3sym) :: Rank4
 Rank4 = n .tdotsym. m
 ```
 
-### Inverse of 4th Order Tensors
-You can invert the 6x6 matrix representation of fully symmetric tensors:
+### Inverse
+Every tensor type (`ten_2D2O`, `ten_2D2Osym`, `ten_3D2O`, `ten_3D2Osym` and all 4th order types)
+can be inverted in three equivalent ways. For 4th order tensors the inverse is taken with respect
+to the double contraction (\( \mathbb{A}^{-1} : \mathbb{A} = \mathbb{I}^S \) for the symmetric types).
 
 ```fortran
 type(ten_3D4O3sym) :: Stiff, Compl
-S = .inv. Stiff
+real(real64) :: kappa
+logical :: ok
+
+Compl = .inv. Stiff                     ! operator
+Compl = Stiff%inv()                     ! method
+call inverse(Stiff, Compl, ok, kappa)   ! success flag and condition number (optional)
 ```
+
+If the tensor is singular, `.inv.` and `%inv()` return quiet NaN in every component, and
+`inverse` returns `ok = .false.` (and `kappa = huge(1.0D0)`). `kappa` is the condition number
+\( \kappa_\infty \) of the matrix that is inverted. When compiling with `-ffast-math`, check `ok`
+rather than testing for NaN.

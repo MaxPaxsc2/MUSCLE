@@ -119,6 +119,8 @@ module muscle_tensor_2d2o
             !! Computes the determinant of the tensor.
         procedure, public :: transpose => transpose_2D2O
             !! Returns the transposed tensor.
+        procedure, public :: inv => inv_2D2O
+            !! Inverse tensor (quiet NaN if singular).
     end type ten_2D2O
 
     public :: operator(.approx.)
@@ -174,6 +176,17 @@ module muscle_tensor_2d2o
     interface transpose
         module procedure transpose_2D2O
     end interface
+    public :: operator(.inv.)
+    interface operator (.inv.)
+        module procedure inv_2D2O
+    end interface
+
+    public :: inverse
+    interface inverse
+        !! `call inverse(a, a_inv, ok [, cond])`: inverse with a success flag and condition number.
+        module procedure inverse_2D2O
+    end interface
+
 contains
 
     pure subroutine ten_2D2O_real64_assign(a, b)
@@ -434,5 +447,53 @@ contains
         res%vals(4) = self%vals(4) ! yy -> yy
         res%vals(5) = self%vals(5) ! zz -> zz
     end function transpose_2D2O
+
+    pure subroutine inverse_2D2O(a, a_inv, ok, cond)
+        !! Inverse of a `ten_2D2O` with a success flag (generic `inverse`, also used by `.inv.` and
+        !! `%inv()`).
+        !!
+        !! The in-plane block and the out-of-plane component are inverted together as the 3x3 matrix
+        !! \( [[A_{11}, A_{12}, 0], [A_{21}, A_{22}, 0], [0, 0, A_{33}]] \) with `M33INV` (adjugate +
+        !! \( \kappa_\infty \), LU fallback), which also handles well-conditioned tensors of extreme
+        !! scale.
+        !!
+        !! If the matrix is singular (or contains NaN): `ok = .false.`, `a_inv` is filled with quiet
+        !! NaN and `cond = huge(1.0D0)`.
+        use muscle_math_inverses, only : M33INV, QUIET_NAN
+        implicit none
+        class(ten_2D2O), intent(in) :: a
+            !! Tensor to invert.
+        type(ten_2D2O), intent(out) :: a_inv
+            !! Inverse tensor (quiet NaN if `a` is singular).
+        logical, intent(out) :: ok
+            !! `.true.` if the inversion succeeded, `.false.` if `a` is singular.
+        real(real64), intent(out), optional :: cond
+            !! Condition number \( \kappa_\infty \) of the 3x3 matrix that is inverted (from `M33INV`); `huge(1.0D0)` if singular.
+        real(real64) :: m(3,3), x(3,3), kap
+
+        m = reshape((/ a%vals(1), a%vals(2), 0.0D0, &
+                       a%vals(3), a%vals(4), 0.0D0, &
+                       0.0D0,     0.0D0,     a%vals(5) /), (/3,3/))
+        call M33INV(m, x, ok, kap)
+        if (.not. ok) then
+            a_inv%vals = QUIET_NAN()
+            if (present(cond)) cond = huge(1.0D0)
+            return
+        end if
+        a_inv%vals = (/ x(1,1), x(2,1), x(1,2), x(2,2), x(3,3) /)   ! (xx, yx, xy, yy, zz)
+        if (present(cond)) cond = kap
+    end subroutine inverse_2D2O
+
+    pure function inv_2D2O(self) result(res)
+        !! `.inv.` and `%inv()`: inverse of a `ten_2D2O`; quiet NaN if it is singular (use the
+        !! generic `inverse` to get a success flag and the condition number).
+        implicit none
+        class(ten_2D2O), intent(in) :: self
+            !! Tensor to invert.
+        type(ten_2D2O) :: res
+            !! Inverse tensor.
+        logical :: ok
+        call inverse_2D2O(self, res, ok)
+    end function inv_2D2O
 
 end module muscle_tensor_2d2o

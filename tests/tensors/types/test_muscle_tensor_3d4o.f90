@@ -154,14 +154,15 @@ end subroutine test_3D4O_convert_2sym
 subroutine test_3D4O_inverse(passed)
     !! .inv.: A * inv(A) = inv(A) * A = I_9 (products of the 9x9 representations) for a
     !! diagonally dominant A (diagonal 10, off-diagonal |a| <= 1, so cond(A) ~ 2): the LU
-    !! round-off is ~1e-15, tol 1e-12. A singular A (all entries equal, rank 1) currently
-    !! returns the zero tensor.
+    !! round-off is ~1e-15, tol 1e-12. A singular A (all entries equal, rank 1) returns quiet
+    !! NaN in every component.
     use, intrinsic :: iso_fortran_env
+    use, intrinsic :: ieee_arithmetic, only : ieee_is_nan
     use muscle_tensors
     use muscle_test_utils
     implicit none
     logical, intent(out) :: passed
-    type(ten_3D4O) :: a, ainv, zero
+    type(ten_3D4O) :: a, ainv
     real(real64) :: m(9,9), id9(9,9)
     integer :: i, j
 
@@ -179,6 +180,6 @@ subroutine test_3D4O_inverse(passed)
     call check_approx(passed, "inv(A) * A = I", matmul(ainv%vals, a%vals), id9, tol=1D-12)
 
     a = 1D0
-    zero = 0D0
-    call check_approx(passed, ".inv. (singular) = 0", .inv. a, zero, tol=0D0)
+    ainv = .inv. a
+    call check_true(passed, ".inv. (singular) = NaN", all(ieee_is_nan(ainv%vals)))
 end subroutine test_3D4O_inverse

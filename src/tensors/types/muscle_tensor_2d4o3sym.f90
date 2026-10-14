@@ -153,6 +153,8 @@ module muscle_tensor_2d4o3sym
                 !! Sets selected components by name.
             procedure, public :: is_approx => is_approx_2D4O3sym
                 !! Compares two tensors for approximate equality.
+            procedure, public :: inv => inv_2D4O3sym
+                !! Inverse tensor (quiet NaN if singular).
     end type ten_2D4O3sym
 
     public :: operator(.approx.)
@@ -191,6 +193,12 @@ module muscle_tensor_2d4o3sym
     interface assignment (=)
         module procedure assign_ten_2D4O3sym_real64
     end interface
+    public :: inverse
+    interface inverse
+        !! `call inverse(a, a_inv, ok [, cond])`: inverse with a success flag and condition number.
+        module procedure inverse_2D4O3sym
+    end interface
+
 contains
 
     pure subroutine init_ten_2D4O3sym(self, vals)
@@ -369,43 +377,61 @@ contains
         res%vals = b%vals/a
     end function div_2D4O3sym_real64
 
-    pure function inv_2D4O3sym(a) result(res)
-        !! `.inv.` Computes the inverse of a ten_2D4O3sym tensor, i.e. the tensor
-        !! \(\mathbb{A}^{-1}\) such that \(\mathbb{A}^{-1} : \mathbb{A} = \mathbb{I}^S\).
+    pure subroutine inverse_2D4O3sym(a, a_inv, ok, cond)
+        !! Inverse of a `ten_2D4O3sym` with a success flag (generic `inverse`, also used by `.inv.` and
+        !! `%inv()`).
         !!
-        !! Reconstructs the 4x4 symmetric Voigt matrix, inverts it with `M44INV`
-        !! (adjugate with LU fallback), symmetrizes the result (the inverse is exactly
-        !! symmetric only up to round-off, and a single triangle is stored) and extracts the
-        !! 10 independent components of the inverse,
-        !! scaling the shear row/column by 1/2 and the shear-shear term by 1/4.
-        !! This keeps the result consistent with the tensorial-shear Voigt convention
-        !! used by `.ddot.` (same scheme as `inv_3D4O3sym`).
-        !! A zero tensor is returned if the matrix is singular.
-        use muscle_math_inverses, only : M44INV
+        !! \( \mathbb{A}^{-1} : \mathbb{A} = \mathbb{I}^S \). The 4x4 symmetric Voigt matrix is
+        !! inverted with `M44INV` (adjugate + \( \kappa_\infty \), LU fallback) and symmetrized (the
+        !! inverse is symmetric only up to round-off and a single triangle is stored). The shear
+        !! row/column are scaled by 1/2 and the shear-shear term by 1/4 (tensorial-shear
+        !! convention of `.ddot.`).
+        !!
+        !! If the matrix is singular (or contains NaN): `ok = .false.`, `a_inv` is filled with quiet
+        !! NaN and `cond = huge(1.0D0)`.
+        use muscle_math_inverses, only : M44INV, QUIET_NAN
         implicit none
-        type(ten_2D4O3sym), intent(in) :: a
+        class(ten_2D4O3sym), intent(in) :: a
             !! Tensor to invert.
-        type(ten_2D4O3sym) :: res
-            !! Inverse tensor.
-        real(real64) :: mat_a(4,4), mat_b(4,4), v(10)
-        logical :: ok
+        type(ten_2D4O3sym), intent(out) :: a_inv
+            !! Inverse tensor (quiet NaN if `a` is singular).
+        logical, intent(out) :: ok
+            !! `.true.` if the inversion succeeded, `.false.` if `a` is singular.
+        real(real64), intent(out), optional :: cond
+            !! Condition number \( \kappa_\infty \) of the stored Voigt matrix that is inverted; `huge(1.0D0)` if singular.
+        real(real64) :: mat_a(4,4), x(4,4), v(10), kap
+
         v = a%vals
         mat_a = reshape((/  v(1),  v(5),  v(8), v(10), &
                             v(5),  v(2),  v(6),  v(9), &
                             v(8),  v(6),  v(3),  v(7), &
                            v(10),  v(9),  v(7),  v(4)  &
                         /), (/4,4/))
+        call M44INV(mat_a, x, ok, kap)
+        if (.not. ok) then
+            a_inv%vals = QUIET_NAN()
+            if (present(cond)) cond = huge(1.0D0)
+            return
+        end if
+        x = 0.5D0*(x + transpose(x))
+        a_inv%vals = (/ x(1,1), x(2,2), x(3,3), x(4,4)/4D0, &
+                        x(1,2), x(2,3), x(3,4)/2D0,         &
+                        x(1,3), x(2,4)/2D0,                 &
+                        x(1,4)/2D0                          &
+                     /)
+        if (present(cond)) cond = kap
+    end subroutine inverse_2D4O3sym
 
-        call M44INV(mat_a, mat_b, ok)
-        mat_b = 0.5D0*(mat_b + transpose(mat_b))
-
-        v = (/ mat_b(1,1), mat_b(2,2), mat_b(3,3), mat_b(4,4)/4D0, &
-               mat_b(1,2), mat_b(2,3), mat_b(3,4)/2D0,             &
-               mat_b(1,3), mat_b(2,4)/2D0,                         &
-               mat_b(1,4)/2D0                                      &
-             /)
-
-        call res%init(v)
+    pure function inv_2D4O3sym(self) result(res)
+        !! `.inv.` and `%inv()`: inverse of a `ten_2D4O3sym`; quiet NaN if it is singular (use the
+        !! generic `inverse` to get a success flag and the condition number).
+        implicit none
+        class(ten_2D4O3sym), intent(in) :: self
+            !! Tensor to invert.
+        type(ten_2D4O3sym) :: res
+            !! Inverse tensor.
+        logical :: ok
+        call inverse_2D4O3sym(self, res, ok)
     end function inv_2D4O3sym
 
     pure subroutine assign_ten_2D4O3sym_real64(a, b)

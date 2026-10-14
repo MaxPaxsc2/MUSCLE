@@ -157,11 +157,12 @@ subroutine test_det_inv(passed)
     !! A = [[2,1,0],[1,3,0],[0,0,4]] -> det = (6-1)*4 = 20,
     !! A^-1 = [[3/5,-1/5,0],[-1/5,2/5,0],[0,0,1/4]].
     use, intrinsic :: iso_fortran_env
+    use, intrinsic :: ieee_arithmetic, only : ieee_is_nan
     use muscle_tensors
     use muscle_test_utils
     implicit none
     logical, intent(out) :: passed
-    type(ten_2D2Osym) :: a, ainv, expected, zero
+    type(ten_2D2Osym) :: a, ainv, expected
     type(ten_2D2O) :: prod, ident
 
     passed = .true.
@@ -177,10 +178,10 @@ subroutine test_det_inv(passed)
     prod = a * ainv
     call check_approx(passed, "a * inv(a) = I", prod, ident, tol=1D-12)
 
-    ! Singular tensor (zz = 0): the inverse is defined as the zero tensor
+    ! Singular tensor (zz = 0): .inv. returns quiet NaN in every component
     call a%init(xx=2D0, yy=3D0, zz=0D0, xy=1D0)
-    zero = 0D0
-    call check_approx(passed, ".inv. (singular) = 0", .inv. a, zero)
+    ainv = .inv. a
+    call check_true(passed, ".inv. (singular) = NaN", all(ieee_is_nan(ainv%vals)))
 end subroutine test_det_inv
 
 

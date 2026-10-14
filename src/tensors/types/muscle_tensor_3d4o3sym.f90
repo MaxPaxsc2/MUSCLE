@@ -152,6 +152,8 @@ module muscle_tensor_3d4o3sym
             procedure, public :: norm => norm_3D4O3sym
             procedure, public :: set => set_ten3D4O3sym
             procedure, public :: is_approx => is_approx_3D4O3sym
+            procedure, public :: inv => inv_3D4O3sym
+                !! Inverse tensor (quiet NaN if singular).
     end type ten_3D4O3sym
 
     public :: operator(.approx.)
@@ -190,6 +192,12 @@ module muscle_tensor_3d4o3sym
     interface assignment (=)
         module procedure assign_ten_3D4O3sym_real64
     end interface
+    public :: inverse
+    interface inverse
+        !! `call inverse(a, a_inv, ok [, cond])`: inverse with a success flag and condition number.
+        module procedure inverse_3D4O3sym
+    end interface
+
 contains
     
     pure subroutine init_ten_3D4O3sym(self, vals)
@@ -328,59 +336,75 @@ contains
         res%vals = b%vals/a
     end function div_3D4O3sym_real64
 
-    pure function inv_3D4O3sym(a) result(res)
-        !! `.inv.` Computes the inverse of a ten_3D4O3sym tensor.
-        !! Reconstructs the 6x6 symmetric Voigt matrix, inverts it using `M66INV`
-        !! (LU with partial pivoting in plain Fortran), symmetrizes the result (the inverse
-        !! is exactly symmetric only up to round-off, and a single triangle is stored),
-        !! and extracts the 21 independent components of the inverse, applying
-        !! scaling factors (1/2, 1/4) to the off-diagonal Voigt components of the
-        !! resulting inverse matrix before storing them. This ensures consistency
-        !! for subsequent Voigt-based tensor operations.
-        use, intrinsic :: iso_fortran_env
-        use muscle_math_inverses
+    pure subroutine inverse_3D4O3sym(a, a_inv, ok, cond)
+        !! Inverse of a `ten_3D4O3sym` with a success flag (generic `inverse`, also used by `.inv.` and
+        !! `%inv()`).
+        !!
+        !! \( \mathbb{A}^{-1} : \mathbb{A} = \mathbb{I}^S \). The 6x6 symmetric Voigt matrix is
+        !! inverted with `M66INV` (LU with partial pivoting) and symmetrized (the inverse is symmetric
+        !! only up to round-off and a single triangle is stored). The shear blocks are scaled by 1/2
+        !! (normal-shear) and 1/4 (shear-shear) for the tensorial-shear convention of `.ddot.`.
+        !!
+        !! Storage of the 21 components in the Voigt matrix (index:ijkl):
+        !!
+        !! ```text
+        !! | ( 1:1111) ( 7:1122) (12:1133) (16:1112) (19:1123) (21:1113) |
+        !! | ( 7:2211) ( 2:2222) ( 8:2233) (13:2212) (17:2223) (20:2213) |
+        !! | (12:3311) ( 8:3322) ( 3:3333) ( 9:3312) (14:3323) (18:3313) |
+        !! | (16:1211) (13:1222) ( 9:1233) ( 4:1212) (10:1223) (15:1213) |
+        !! | (19:2311) (17:2322) (14:2333) (10:2312) ( 5:2323) (11:2313) |
+        !! | (21:1311) (20:1322) (18:1333) (15:1312) (11:1323) ( 6:1313) |
+        !! ```
+        !!
+        !! If the matrix is singular (or contains NaN): `ok = .false.`, `a_inv` is filled with quiet
+        !! NaN and `cond = huge(1.0D0)`.
+        use muscle_math_inverses, only : M66INV, COND_INF, QUIET_NAN
         implicit none
-        type(ten_3D4O3sym), intent(in) :: a
-        type(ten_3D4O3sym) :: res
-        real(real64) :: mat_a(6,6), mat_b(6,6), v(21)
-        logical :: ok
+        class(ten_3D4O3sym), intent(in) :: a
+            !! Tensor to invert.
+        type(ten_3D4O3sym), intent(out) :: a_inv
+            !! Inverse tensor (quiet NaN if `a` is singular).
+        logical, intent(out) :: ok
+            !! `.true.` if the inversion succeeded, `.false.` if `a` is singular.
+        real(real64), intent(out), optional :: cond
+            !! Condition number \( \kappa_\infty \) of the stored Voigt matrix that is inverted; `huge(1.0D0)` if singular.
+        real(real64) :: mat_a(6,6), x(6,6), v(21)
+
         v = a%vals
         mat_a = reshape((/  v(1),  v(7), v(12), v(16), v(19), v(21), &
                             v(7),  v(2),  v(8), v(13), v(17), v(20), &
-                           v(12),  v(8),  v(3),  v(9), v(14), v(18), & 
+                           v(12),  v(8),  v(3),  v(9), v(14), v(18), &
                            v(16), v(13),  v(9),  v(4), v(10), v(15), &
                            v(19), v(17), v(14), v(10),  v(5), v(11), &
                            v(21), v(20), v(18), v(15), v(11),  v(6)  &
                         /), (/6,6/))
+        call M66INV(mat_a, x, ok)
+        if (.not. ok) then
+            a_inv%vals = QUIET_NAN()
+            if (present(cond)) cond = huge(1.0D0)
+            return
+        end if
+        if (present(cond)) cond = COND_INF(mat_a, x)
+        x = 0.5D0*(x + transpose(x))
+        a_inv%vals = (/ x(1,1), x(2,2), x(3,3), x(4,4)/4D0, x(5,5)/4D0, x(6,6)/4D0, &
+                        x(1,2), x(2,3), x(3,4)/2D0, x(4,5)/4D0, x(5,6)/4D0,         &
+                        x(1,3), x(2,4)/2D0, x(3,5)/2D0, x(4,6)/4D0,                 &
+                        x(1,4)/2D0, x(2,5)/2D0, x(3,6)/2D0,                         &
+                        x(1,5)/2D0, x(2,6)/2D0,                                     &
+                        x(1,6)/2D0                                                  &
+                     /)
+    end subroutine inverse_3D4O3sym
 
-        call M66INV(mat_a, mat_b, ok)
-        mat_b = 0.5D0*(mat_b + transpose(mat_b))
-
-        ! Extract the 21 components of the inverse matrix (mat_b)
-        ! Apply scaling factors to off-diagonal Voigt components of the inverse
-        ! This scaling is necessary for the inverse tensor stored in 21-component
-        ! format to work correctly in standard Voigt tensor contractions like C:E
-        ! where factors of 2 or 4 might be implicitly assumed depending on the
-        ! definition of the contraction and the storage format.
-
-        v = (/ mat_b(1,1), mat_b(2,2), mat_b(3,3), mat_b(4,4)/4D0, mat_b(5,5)/4D0, mat_b(6,6)/4D0,  &
-               mat_b(1,2), mat_b(2,3), mat_b(3,4)/2D0, mat_b(4,5)/4D0, mat_b(5,6)/4D0,              &
-               mat_b(1,3), mat_b(2,4)/2D0, mat_b(3,5)/2D0, mat_b(4,6)/4D0,                          &
-               mat_b(1,4)/2D0, mat_b(2,5)/2D0, mat_b(3,6)/2D0,                                      &
-               mat_b(1,5)/2D0, mat_b(2,6)/2D0,                                                  &
-               mat_b(1,6)/2D0                                                               &
-              /)
-
-        call res%init(v)
-        
-            !
-            !  | ( 1:1111) ( 7:1122) (12:1133) (16:1112) (19:1123) (21:1113) |
-            !  | ( 7:2211) ( 2:2222) ( 8:2233) (13:2212) (17:2223) (20:2213) |
-            !  | (12:3311) ( 8:3322) ( 3:3333) ( 9:3312) (14:3323) (18:3313) |
-            !  | (16:1211) (13:1222) ( 9:1233) ( 4:1212) (10:1223) (15:1213) |
-            !  | (19:2311) (17:2322) (14:2333) (10:2312) ( 5:2323) (11:2313) |
-            !  | (21:1311) (20:1322) (18:1333) (15:1312) (11:1323) ( 6:1313) |
-
+    pure function inv_3D4O3sym(self) result(res)
+        !! `.inv.` and `%inv()`: inverse of a `ten_3D4O3sym`; quiet NaN if it is singular (use the
+        !! generic `inverse` to get a success flag and the condition number).
+        implicit none
+        class(ten_3D4O3sym), intent(in) :: self
+            !! Tensor to invert.
+        type(ten_3D4O3sym) :: res
+            !! Inverse tensor.
+        logical :: ok
+        call inverse_3D4O3sym(self, res, ok)
     end function inv_3D4O3sym
 
     pure subroutine assign_ten_3D4O3sym_real64(a, b)

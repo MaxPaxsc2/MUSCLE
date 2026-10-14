@@ -17,7 +17,7 @@ module muscle_tensor_3d4o2sym
     !! symmetries, this 6x6 matrix is generally **not** symmetric (\(C_{IJ} \neq C_{JI}\)).
     !!
     !! The module overloads standard arithmetic operators (+, -, *, /), a custom
-    !! equality comparison operator (.approx.), and provides an inverse function (`inv_3D4O2sym`).
+    !! equality comparison operator (.approx.), and the inverse (`.inv.`, `%inv()` and the generic `inverse`).
     !! It also provides methods for initialization.
     !!
     !! Public Entities
@@ -38,7 +38,8 @@ module muscle_tensor_3d4o2sym
     !! - `-`: Subtracts two `ten_3D4O2sym` tensors (binary) or computes the unary negation.
     !! - `*`: Multiplies a `ten_3D4O2sym` tensor by a `real(real64)` scalar (or vice-versa).
     !! - `/`: Divides a `ten_3D4O2sym` tensor by a `real(real64)` scalar.
-    !! - `.inv.`: (Interface commented out, but function `inv_3D4O2sym` exists) Computes the inverse of the tensor based on its 6x6 matrix representation.
+    !! - `.inv.`: Inverse with respect to \(\mathbb{I}^S\) (6x6 Voigt inversion with shear scaling); quiet NaN if singular.
+    !! - `inverse`: `call inverse(a, a_inv, ok [, cond])`, inverse with a success flag and the condition number.
     !!
     !! Usage
     !! -----
@@ -85,9 +86,9 @@ module muscle_tensor_3d4o2sym
     !!   print *, "Are C and Sum equal?", are_equal
     !!
     !!   ! Inverse (using the function directly)
-    !!   ! type(ten_3D4O2sym) :: tensor_c_inv
-    !!   ! tensor_c_inv = inv_3D4O2sym(tensor_c)
-    !!   ! print *, "Inv C(1,1):", tensor_c_inv%vals(1,1)
+    !!   type(ten_3D4O2sym) :: tensor_c_inv
+    !!   tensor_c_inv = .inv. tensor_c
+    !!   print *, "Inv C(1,1):", tensor_c_inv%vals(1,1)
     !!
     !! end program example_ten_3d4o2sym_usage
     !! ```
@@ -149,17 +150,14 @@ module muscle_tensor_3d4o2sym
             procedure, public :: is_approx => is_approx_3D4O2sym
             procedure, public :: norm => norm_3D4O2sym
             procedure, public :: convert_3sym
+            procedure, public :: inv => inv_3D4O2sym
+                !! Inverse tensor (quiet NaN if singular).
     end type ten_3D4O2sym
 
     public :: operator(.approx.)
     interface operator (.approx.)
         module procedure approx_3D4O2sym
     end interface
-
-    ! public :: operator(.inv.)
-    ! interface operator (.inv.)
-    !     module procedure inv_3D4O2sym
-    ! end interface
 
     public :: operator(+)
     interface operator (+)
@@ -182,6 +180,17 @@ module muscle_tensor_3d4o2sym
     interface operator ( / )
         module procedure div_3D4O2sym_real64
     end interface
+    public :: operator(.inv.)
+    interface operator (.inv.)
+        module procedure inv_3D4O2sym
+    end interface
+
+    public :: inverse
+    interface inverse
+        !! `call inverse(a, a_inv, ok [, cond])`: inverse with a success flag and condition number.
+        module procedure inverse_3D4O2sym
+    end interface
+
 contains
     
     pure subroutine init_ten_3D4O2sym(self, vals)
@@ -323,35 +332,53 @@ contains
         res%vals = b%vals/a
     end function div_3D4O2sym_real64
 
-    pure function inv_3D4O2sym(a) result(res)
-        !! Computes the inverse of a ten_3D4O2sym tensor.
-        !! This calculates the inverse of the 6x6 Voigt matrix representation.
-        !! Note: Appropriate scaling factors (1/2, 1/4) are applied to the result
-        !! to ensure consistency with tensor operations like the double dot product
-        !! when using Voigt notation where shear strains/stresses might be represented
-        !! differently (e.g., tensorial vs engineering).
-        !! The 6x6 matrix is inverted with `M66INV` (LU with partial pivoting in plain Fortran).
-        use, intrinsic :: iso_fortran_env
-        use muscle_math_inverses
+    pure subroutine inverse_3D4O2sym(a, a_inv, ok, cond)
+        !! Inverse of a `ten_3D4O2sym` with a success flag (generic `inverse`, also used by `.inv.` and
+        !! `%inv()`).
+        !!
+        !! \( \mathbb{A}^{-1} : \mathbb{A} = \mathbb{A} : \mathbb{A}^{-1} = \mathbb{I}^S \), also without
+        !! major symmetry. The 6x6 Voigt matrix is inverted with `M66INV` (LU with partial
+        !! pivoting) and the shear blocks are scaled by 1/2 (normal-shear) and 1/4 (shear-shear) to
+        !! stay consistent with the tensorial-shear convention of `.ddot.`:
+        !! \( S = W^{-1} C^{-1} W^{-1} \), \( W = \mathrm{diag}(1,1,1,2,2,2) \).
+        !!
+        !! If the matrix is singular (or contains NaN): `ok = .false.`, `a_inv` is filled with quiet
+        !! NaN and `cond = huge(1.0D0)`.
+        use muscle_math_inverses, only : M66INV, COND_INF, QUIET_NAN
         implicit none
-        type(ten_3D4O2sym), intent(in) :: a
+        class(ten_3D4O2sym), intent(in) :: a
+            !! Tensor to invert.
+        type(ten_3D4O2sym), intent(out) :: a_inv
+            !! Inverse tensor (quiet NaN if `a` is singular).
+        logical, intent(out) :: ok
+            !! `.true.` if the inversion succeeded, `.false.` if `a` is singular.
+        real(real64), intent(out), optional :: cond
+            !! Condition number \( \kappa_\infty \) of the stored Voigt matrix that is inverted; `huge(1.0D0)` if singular.
+        real(real64) :: x(6,6)
+
+        call M66INV(a%vals, x, ok)
+        if (.not. ok) then
+            a_inv%vals = QUIET_NAN()
+            if (present(cond)) cond = huge(1.0D0)
+            return
+        end if
+        if (present(cond)) cond = COND_INF(a%vals, x)
+        x(1:3, 4:6) = x(1:3, 4:6)/2D0
+        x(4:6, 1:3) = x(4:6, 1:3)/2D0
+        x(4:6, 4:6) = x(4:6, 4:6)/4D0
+        a_inv%vals = x
+    end subroutine inverse_3D4O2sym
+
+    pure function inv_3D4O2sym(self) result(res)
+        !! `.inv.` and `%inv()`: inverse of a `ten_3D4O2sym`; quiet NaN if it is singular (use the
+        !! generic `inverse` to get a success flag and the condition number).
+        implicit none
+        class(ten_3D4O2sym), intent(in) :: self
+            !! Tensor to invert.
         type(ten_3D4O2sym) :: res
-        real(real64) :: mat_a(6,6), mat_b(6,6)
+            !! Inverse tensor.
         logical :: ok
-        mat_a = a%vals
-
-        call M66INV(mat_a, mat_b, ok)
-        ! TODO: Add error handling if 'ok' is .false.
-
-        ! Apply scaling factors for consistency with Voigt operations
-        ! This assumes the inverse is needed for operations where Voigt notation
-        ! implicitly includes factors of 2 for shear terms in contractions.
-        mat_b(1:3, 4:6) = mat_b(1:3, 4:6)/2D0
-        mat_b(4:6, 1:3) = mat_b(4:6, 1:3)/2D0
-        mat_b(4:6, 4:6) = mat_b(4:6, 4:6)/4D0
-        
-        call res%init(mat_b)
-
+        call inverse_3D4O2sym(self, res, ok)
     end function inv_3D4O2sym
 
     pure function convert_3sym(self) result(res)
