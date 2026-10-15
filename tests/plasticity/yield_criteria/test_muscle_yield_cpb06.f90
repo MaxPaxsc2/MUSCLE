@@ -296,6 +296,7 @@ end subroutine
 
 subroutine CPB06_test_materials(cpb)
     ! Materials of the tests of the analytical derivatives
+    ! Called by test_CPB06_gradient_numeric_7 and test_CPB06_gradient_analytical_8
     use, intrinsic :: iso_fortran_env
     use muscle_yield_cpb06
     implicit none
@@ -350,6 +351,7 @@ subroutine test_CPB06_gradient_numeric_7(passed)
     ! Gradient against the finite-difference gradient of the base class. Measured differences:
     ! 1.3e-10 or less in the general state and 1.2e-7 in pure shear, where the finite differences
     ! straddle the zero principal value
+    ! Called by program test_muscle_yield_cpb06 (STOP 7)
     use, intrinsic :: iso_fortran_env
     use muscle_tensors
     use muscle_yield_cpb06
@@ -413,6 +415,7 @@ end subroutine test_CPB06_gradient_numeric_7
 subroutine test_CPB06_gradient_analytical_8(passed)
     ! Gradient against analytical values: von Mises in the isotropic limit, a high-precision
     ! reference and the exact identities df/dsigma : sigma = f and tr(df/dsigma) = 0
+    ! Called by program test_muscle_yield_cpb06 (STOP 8)
     use, intrinsic :: iso_fortran_env
     use muscle_tensors
     use muscle_yield_cpb06
