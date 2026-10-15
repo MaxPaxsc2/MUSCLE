@@ -132,6 +132,7 @@ contains
         !! \[ \mathcal{H}_{mnop}^{(a)} = \frac{\partial^2 \Sigma_a}{\partial \Sigma_{mn} \partial \Sigma_{op}} \]
         !!
         !! This function is pure and returns an array of three fully symmetric fourth-order tensors.
+        use muscle_math_derivatives, only : dsquare
         implicit none
         type(ten_3D2Osym), intent(in)   :: Sigma          !! Symmetric second-order tensor \(\Sigma_{ij}\)
         real(real64), intent(in)        :: eigenvalues(3) !! Evaluated eigenvalues \(\Sigma_1, \Sigma_2, \Sigma_3\)
@@ -153,7 +154,7 @@ contains
         I2 = 0.5D0 * (I1**2 - (Sigma .ddot. Sigma))
        
         ! Fourth-order tensor M_ijkl (analytical derivative of \Sigma^2) 
-        M_tensor = Sigma%dsquare()
+        M_tensor = dsquare(Sigma)
 
         num_sing = 0
         good_idx = 1
