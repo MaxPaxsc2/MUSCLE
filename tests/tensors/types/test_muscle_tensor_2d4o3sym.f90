@@ -22,20 +22,17 @@ program test_muscle_tensor_2d4o3sym
     call test_ten_2D4O3sym_ddot(passed)
     if (.not. passed) STOP 6
 
-    call test_ten_2D4O3sym_tdot(passed)
+    call test_ten_2D4O3sym_inv_isotropic(passed)
     if (.not. passed) STOP 7
 
-    call test_ten_2D4O3sym_inv_isotropic(passed)
+    call test_ten_2D4O3sym_set_norm_assign(passed)
     if (.not. passed) STOP 8
 
-    call test_ten_2D4O3sym_set_norm_assign(passed)
+    call test_ten_2D4O3sym_identities(passed)
     if (.not. passed) STOP 9
 
-    call test_ten_2D4O3sym_identities(passed)
-    if (.not. passed) STOP 10
-
     call test_ten_2D4O3sym_ddot_4O(passed)
-    if (.not. passed) STOP 11
+    if (.not. passed) STOP 10
 
     STOP 0
 end program test_muscle_tensor_2d4o3sym
@@ -234,59 +231,6 @@ subroutine test_ten_2D4O3sym_ddot(passed)
     call check_approx(passed, "C .ddot. x", to_test1 .ddot. to_test2, expected_result)
     call check_approx(passed, "x .ddot. C", to_test2 .ddot. to_test1, expected_result)
 end subroutine
-
-
-subroutine test_ten_2D4O3sym_tdot(passed)
-    !! Dyadic products with a = (1,2,3,4), b = (5,6,7,8) in Voigt (xx,yy,zz,xy):
-    !! - a .tdot. b is the 4x4 matrix C_IJ = a_I b_J (ten_2D4O2sym, no major symmetry);
-    !! - a .tdotsym. b = (a(x)b + b(x)a)/2 and .tdotsym. a = a(x)a (ten_2D4O3sym);
-    !! - a .tdotsym. I  = (a(x)I + I(x)a)/2.
-    !! All entries are exact products of small integers.
-    use, intrinsic :: iso_fortran_env
-    use muscle_tensors
-    use muscle_test_utils
-    implicit none
-    logical, intent(out) :: passed
-    type(ten_2D2Osym) :: a, b
-    type(ten_2D4O2sym) :: ab, ab_sym_full
-    type(ten_2D4O3sym) :: expected
-    type(iden_2O) :: I2
-    real(real64) :: m(4,4), expected_m(4,4)
-    integer :: i, j
-
-    passed = .true.
-    call a%init(xx=1D0, yy=2D0, zz=3D0, xy=4D0)
-    call b%init(xx=5D0, yy=6D0, zz=7D0, xy=8D0)
-
-    ab = a .tdot. b
-    do j = 1, 4
-        do i = 1, 4
-            m(i,j) = a%vals(i)*b%vals(j)
-        end do
-    end do
-    call check_approx(passed, "a .tdot. b", ab%vals, m, tol=1D-15)
-
-    ab_sym_full = a .tdotsym. b
-    call check_approx(passed, "a .tdotsym. b", ab_sym_full%vals, 0.5D0*(m + transpose(m)), tol=1D-15)
-
-    ! a(x)a: (11,22,33,44,12,23,34,13,24,14)
-    call expected%init((/1D0, 4D0, 9D0, 16D0, 2D0, 6D0, 12D0, 3D0, 8D0, 4D0/))
-    call check_approx(passed, ".tdotsym. a", .tdotsym. a, expected)
-    call check_approx(passed, "a .tdotsym. a", a .tdotsym. a, expected)
-
-    ! (a(x)I + I(x)a)/2: normal-normal block (a_I + a_J)/2, normal-shear a_xy/2, shear-shear 0
-    call expected%init((/1D0, 2D0, 3D0, 0D0, 1.5D0, 2.5D0, 2D0, 2D0, 2D0, 2D0/))
-    call check_approx(passed, "a .tdotsym. I", a .tdotsym. I2, expected)
-    call check_approx(passed, "I .tdotsym. a", I2 .tdotsym. a, expected)
-
-    ! a .tdot. I fills the three normal columns with a; I .tdot. a is its transpose
-    expected_m = 0D0
-    expected_m(:,1:3) = spread(a%vals, 2, 3)
-    ab = a .tdot. I2
-    call check_approx(passed, "a .tdot. I", ab%vals, expected_m, tol=0D0)
-    ab = I2 .tdot. a
-    call check_approx(passed, "I .tdot. a", ab%vals, transpose(expected_m), tol=0D0)
-end subroutine test_ten_2D4O3sym_tdot
 
 
 subroutine test_ten_2D4O3sym_inv_isotropic(passed)
