@@ -32,6 +32,8 @@ module muscle_tensor_3d4o
         procedure, public :: is_approx => is_approx_3D4O
         procedure, public :: norm => norm_3D4O
         procedure, public :: convert_2sym => convert_to_3D4O2sym
+        procedure, public :: inv => inv_3D4O
+            !! Inverse tensor (quiet NaN if singular).
     end type ten_3D4O
 
     public :: operator(.approx.)
@@ -77,6 +79,12 @@ module muscle_tensor_3d4o
         module procedure print_ten_3D4O
     end interface
 #endif
+
+    public :: inverse
+    interface inverse
+        !! `call inverse(a, a_inv, ok [, cond])`: inverse with a success flag and condition number.
+        module procedure inverse_3D4O
+    end interface
 
 contains
 
@@ -219,15 +227,46 @@ contains
         end do
     end function convert_to_3D4O2sym
 
-    pure function inv_3D4O(a) result(res)
-        !! Computes the inverse of ten_3D4O by delegating to M99INV in muscle_math_inverses.
+    pure subroutine inverse_3D4O(a, a_inv, ok, cond)
+        !! Inverse of a `ten_3D4O` with a success flag (generic `inverse`, also used by `.inv.` and
+        !! `%inv()`).
+        !!
+        !! The 9x9 matrix representation is inverted with `M99INV` (LU with partial pivoting).
+        !!
+        !! If the matrix is singular (or contains NaN): `ok = .false.`, `a_inv` is filled with quiet
+        !! NaN and `cond = huge(1.0D0)`.
+        use muscle_math_inverses, only : M99INV, COND_INF, QUIET_NAN
         implicit none
-        type(ten_3D4O), intent(in) :: a
-        type(ten_3D4O)             :: res
-        logical                    :: ok
+        class(ten_3D4O), intent(in) :: a
+            !! Tensor to invert.
+        type(ten_3D4O), intent(out) :: a_inv
+            !! Inverse tensor (quiet NaN if `a` is singular).
+        logical, intent(out) :: ok
+            !! `.true.` if the inversion succeeded, `.false.` if `a` is singular.
+        real(real64), intent(out), optional :: cond
+            !! Condition number \( \kappa_\infty \) of the stored matrix that is inverted; `huge(1.0D0)` if singular.
+        real(real64) :: x(9,9)
 
-        call M99INV(a%vals, res%vals, ok)
-        if (.not. ok) res%vals = 0.0D0
+        call M99INV(a%vals, x, ok)
+        if (.not. ok) then
+            a_inv%vals = QUIET_NAN()
+            if (present(cond)) cond = huge(1.0D0)
+            return
+        end if
+        a_inv%vals = x
+        if (present(cond)) cond = COND_INF(a%vals, x)
+    end subroutine inverse_3D4O
+
+    pure function inv_3D4O(self) result(res)
+        !! `.inv.` and `%inv()`: inverse of a `ten_3D4O`; quiet NaN if it is singular (use the
+        !! generic `inverse` to get a success flag and the condition number).
+        implicit none
+        class(ten_3D4O), intent(in) :: self
+            !! Tensor to invert.
+        type(ten_3D4O) :: res
+            !! Inverse tensor.
+        logical :: ok
+        call inverse_3D4O(self, res, ok)
     end function inv_3D4O
 
 #ifdef ENABLE_UDTIO

@@ -1,3 +1,4 @@
 add_muscle_test(bilinear test_muscle_hard_bilinear.f90)
 add_muscle_test(ludwik test_muscle_hard_ludwik.f90)
 add_muscle_test(swift test_muscle_hard_swift.f90)
+add_muscle_test(vocemod test_muscle_hard_vocemod.f90)

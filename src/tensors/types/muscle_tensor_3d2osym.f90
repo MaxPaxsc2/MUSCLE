@@ -153,7 +153,7 @@ module muscle_tensor_3d2osym
             procedure, public :: det => det_3D2Osym
                 !! Computes the determinant of the symmetric 2nd-order tensor.
             procedure, public :: inv => inv_3D2Osym
-                !! Computes the analytical inverse tensor (A^-1).
+                !! Inverse tensor (quiet NaN if singular).
     end type ten_3D2Osym
 
     public :: operator(.approx.)
@@ -213,6 +213,12 @@ module muscle_tensor_3d2osym
         module procedure print_ten_3D2Osym
     end interface
 #endif
+
+    public :: inverse
+    interface inverse
+        !! `call inverse(a, a_inv, ok [, cond])`: inverse with a success flag and condition number.
+        module procedure inverse_3D2Osym
+    end interface
 
 contains
 
@@ -492,49 +498,51 @@ contains
     end function det_3D2Osym
 
 
-    pure function inv_3D2Osym(self) result(res)
-        !! Computes the analytical inverse of a symmetric 2nd-order tensor: A^-1 = adj(A) / det(A).
-        !! If det(A) == 0, returns a zero tensor.
+    pure subroutine inverse_3D2Osym(a, a_inv, ok, cond)
+        !! Inverse of a `ten_3D2Osym` with a success flag (generic `inverse`, also used by `.inv.` and
+        !! `%inv()`).
+        !!
+        !! The symmetric 3x3 matrix is inverted with `M33INV` (adjugate + \( \kappa_\infty \), LU
+        !! fallback) and symmetrized. This replaces the former absolute singularity test
+        !! \( |\det| < 10^{-30} \), which wrongly rejected well-conditioned tensors of small scale.
+        !!
+        !! If the matrix is singular (or contains NaN): `ok = .false.`, `a_inv` is filled with quiet
+        !! NaN and `cond = huge(1.0D0)`.
+        use muscle_math_inverses, only : M33INV, QUIET_NAN
         implicit none
-        class(ten_3D2Osym), intent(in) :: self
-        type(ten_3D2Osym)             :: res
+        class(ten_3D2Osym), intent(in) :: a
+            !! Tensor to invert.
+        type(ten_3D2Osym), intent(out) :: a_inv
+            !! Inverse tensor (quiet NaN if `a` is singular).
+        logical, intent(out) :: ok
+            !! `.true.` if the inversion succeeded, `.false.` if `a` is singular.
+        real(real64), intent(out), optional :: cond
+            !! Condition number \( \kappa_\infty \) of the 3x3 matrix that is inverted (from `M33INV`); `huge(1.0D0)` if singular.
+        real(real64) :: m(3,3), x(3,3), kap
 
-        real(real64) :: a11, a22, a33, a12, a23, a13
-        real(real64) :: c11, c22, c33, c12, c23, c13
-        real(real64) :: det_val, inv_det
-        real(real64), parameter :: EPS_DET = 1.0D-30
-
-        ! 1. Desempaquetar componentes Voigt
-        a11 = self%vals(1); a22 = self%vals(2); a33 = self%vals(3)
-        a12 = self%vals(4); a23 = self%vals(5); a13 = self%vals(6)
-
-        ! 2. Calcular cofactores de la matriz simétrica
-        c11 =  (a22 * a33 - a23**2)
-        c22 =  (a11 * a33 - a13**2)
-        c33 =  (a11 * a22 - a12**2)
-
-        c12 = -(a12 * a33 - a23 * a13)
-        c23 = -(a11 * a23 - a12 * a13)
-        c13 =  (a12 * a23 - a22 * a13)
-
-        ! 3. Calcular determinante usando la primera fila de cofactores
-        det_val = a11 * c11 + a12 * c12 + a13 * c13
-
-        ! 4. Manejo de singularidad (det -> 0)
-        if (abs(det_val) < EPS_DET) then
-            res%vals = 0.0D0
+        m(:,1) = (/ a%vals(1), a%vals(4), a%vals(6) /)
+        m(:,2) = (/ a%vals(4), a%vals(2), a%vals(5) /)
+        m(:,3) = (/ a%vals(6), a%vals(5), a%vals(3) /)
+        call M33INV(m, x, ok, kap)
+        if (.not. ok) then
+            a_inv%vals = QUIET_NAN()
+            if (present(cond)) cond = huge(1.0D0)
             return
         end if
+        x = 0.5D0*(x + transpose(x))
+        a_inv%vals = (/ x(1,1), x(2,2), x(3,3), x(1,2), x(2,3), x(1,3) /)   ! (xx, yy, zz, xy, yz, xz)
+        if (present(cond)) cond = kap
+    end subroutine inverse_3D2Osym
 
-        inv_det = 1.0D0 / det_val
-
-        ! 5. Asignar componentes de la matriz inversa A^-1 = Adj(A) / det(A)
-        res%vals(1) = c11 * inv_det ! xx
-        res%vals(2) = c22 * inv_det ! yy
-        res%vals(3) = c33 * inv_det ! zz
-        res%vals(4) = c12 * inv_det ! xy
-        res%vals(5) = c23 * inv_det ! yz
-        res%vals(6) = c13 * inv_det ! xz
-
+    pure function inv_3D2Osym(self) result(res)
+        !! `.inv.` and `%inv()`: inverse of a `ten_3D2Osym`; quiet NaN if it is singular (use the
+        !! generic `inverse` to get a success flag and the condition number).
+        implicit none
+        class(ten_3D2Osym), intent(in) :: self
+            !! Tensor to invert.
+        type(ten_3D2Osym) :: res
+            !! Inverse tensor.
+        logical :: ok
+        call inverse_3D2Osym(self, res, ok)
     end function inv_3D2Osym
 end module muscle_tensor_3d2osym
