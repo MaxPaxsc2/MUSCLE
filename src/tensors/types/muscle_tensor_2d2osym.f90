@@ -3,32 +3,37 @@
 
 module muscle_tensor_2d2osym
     !! Module muscle_tensor_2d2osym
-    !! =======================
+    !! ============================
     !!
-    !! Defines the type for symmetric 3D second-order tensors and associated operations.
+    !! Defines the type for symmetric 2D (plane / axisymmetric) second-order tensors
+    !! and associated operations.
     !!
     !! This module provides the derived type `ten_2D2Osym` to represent a symmetric
-    !! second-order tensor in three dimensions (like stress or strain tensors).
-    !! The tensor is stored internally using Voigt notation with 6 components
+    !! second-order tensor in a two-dimensional setting (plane strain, plane stress or
+    !! axisymmetry), where the out-of-plane shear components vanish
+    !! (\(A_{13} = A_{23} = 0\)) but the out-of-plane normal component \(A_{33}\) is kept.
+    !! The tensor is stored internally using Voigt notation with 4 components
     !! in the order (11, 22, 33, 12).
     !!
     !! The module overloads standard arithmetic operators (+, -, *, /), a custom
     !! equality comparison operator (.approx.), the deviatoric operator (.dev.),
-    !! and the double dot product operator (.ddot.) for this tensor type.
-    !! It also provides methods for initialization and accessing individual components.
+    !! the double dot product operator (.ddot.) and the inverse operator (.inv.)
+    !! for this tensor type. It also provides methods for initialization and
+    !! accessing individual components.
     !!
     !! Public Entities
     !! ---------------
     !!
     !! ### Derived Type:
     !!
-    !! - `ten_2D2Osym`: Represents a symmetric 3D second-order tensor.
+    !! - `ten_2D2Osym`: Represents a symmetric 2D second-order tensor.
     !!     - Component: `vals(4) :: real(real64)` - Stores the 4 Voigt components
     !!       (xx, yy, zz, xy).
     !!     - Generic Procedure: `init` - Initializes the tensor either from a
     !!       4-element array or from individual xx, yy, zz, xy components.
     !!     - Procedures: `xx`, `yy`, `zz`, `xy` - Accessor functions
     !!       for individual tensor components.
+    !!     - Procedures: `square`, `norm`, `is_approx`, `det`, `inv`.
     !!
     !! ### Operators:
     !!
@@ -39,6 +44,8 @@ module muscle_tensor_2d2osym
     !! - `/`: Divides a `ten_2D2Osym` tensor by a `real(real64)` scalar.
     !! - `.dev.`: Computes the deviatoric part of a `ten_2D2Osym` tensor.
     !! - `.ddot.`: Computes the double dot product (scalar result) of two `ten_2D2Osym` tensors.
+    !! - `.inv.`: Inverse of a `ten_2D2Osym` tensor (also `%inv()`; quiet NaN if singular).
+    !! - `inverse`: `call inverse(a, a_inv, ok [, cond])`, inverse with a success flag and the condition number.
     !!
     !! ### Assignment:
     !!
@@ -55,7 +62,7 @@ module muscle_tensor_2d2osym
     !!   implicit none
     !!
     !!   type(ten_2D2Osym) :: stress, strain, stress_dev
-    !!   real(real64) :: trace_stress, dot_product
+    !!   real(real64) :: dot_product
     !!   logical :: are_equal
     !!
     !!   ! Initialize using individual components (Voigt: 11, 22, 33, 12)
@@ -96,9 +103,10 @@ module muscle_tensor_2d2osym
         !! Symmetric 2D Second-Order Tensor (Voigt Notation)
         !! ==================================================
         !!
-        !! Represents a symmetric second-order tensor in three dimensions, such as
-        !! stress (\(\sigma_{ij}\)) or strain (\(\epsilon_{ij}\)), where \(\sigma_{ij} = \sigma_{ji}\).
-        !! Due to symmetry, only 4 independent components are needed.
+        !! Represents a symmetric second-order tensor in a 2D setting (plane or
+        !! axisymmetric), such as stress (\(\sigma_{ij}\)) or strain (\(\epsilon_{ij}\)),
+        !! where \(\sigma_{ij} = \sigma_{ji}\) and \(\sigma_{13} = \sigma_{23} = 0\).
+        !! Only 4 independent components are needed.
         !!
         !! Storage:
         !! --------
@@ -127,15 +135,24 @@ module muscle_tensor_2d2osym
             generic, public :: init => init_ten_2D2Osym, init2_ten_2D2Osym
                 !! Generic interface for initialization.
             procedure, private :: init_ten_2D2Osym, init2_ten_2D2Osym
-            procedure, public :: xx 
+            procedure, public :: xx
                 !! Accessor for the xx (1,1) component.
-            procedure, public :: yy 
+            procedure, public :: yy
                 !! Accessor for the yy (2,2) component.
             procedure, public :: zz
                 !! Accessor for the zz (3,3) component.
             procedure, public :: xy
                 !! Accessor for the xy (1,2) component.
             procedure, public :: square => square_2D2Osym
+                !! Computes the square of the tensor.
+            procedure, public :: norm => norm_2D2Osym
+                !! Computes the norm of the tensor.
+            procedure, public :: is_approx => is_approx_2D2Osym
+                !! Compares two tensors for approximate equality.
+            procedure, public :: det => det_2D2Osym
+                !! Computes the determinant of the symmetric 2nd-order tensor.
+            procedure, public :: inv => inv_2D2Osym
+                !! Inverse tensor (quiet NaN if singular).
     end type ten_2D2Osym
 
     public :: operator(.approx.)
@@ -175,130 +192,215 @@ module muscle_tensor_2d2osym
         module procedure ddot_2D2Osym_2D2Osym
     end interface
 
-    ! interface operator (.tdot.)
-    !     module procedure tdot_2D2Osym_2D2Osym
-    ! end interface
-
     public :: assignment (=)
     interface assignment (=)
         module procedure ten_2D2Osym_real64_assign
     end interface
 
+    public :: operator(.inv.)
+    interface operator (.inv.)
+        module procedure inv_2D2Osym
+    end interface
+
+#ifdef ENABLE_UDTIO
+    public :: write(formatted)
+    interface write(formatted)
+        module procedure print_ten_2D2Osym
+    end interface
+#endif
+
+    public :: inverse
+    interface inverse
+        !! `call inverse(a, a_inv, ok [, cond])`: inverse with a success flag and condition number.
+        module procedure inverse_2D2Osym
+    end interface
+
 contains
 
     pure subroutine ten_2D2Osym_real64_assign(a, b)
+        !! Assigns the scalar `b` to every stored component of `a`.
         implicit none
         type(ten_2D2Osym), intent(out) :: a
+            !! Target tensor.
         real(real64), intent(in) :: b
+            !! Scalar value copied to all 4 components.
         a%vals = b
     end subroutine
 
     pure subroutine init_ten_2D2Osym(self, vals)
-        !! Initializes a ten_2D2Osym tensor from a 6-element array (Voigt order).
+        !! Initializes a ten_2D2Osym tensor from a 4-element array (Voigt order).
         !!
-        !! voigt notation used: 11, 22, 33, 12, 23, 13
+        !! voigt notation used: 11, 22, 33, 12
         implicit none
         class(ten_2D2Osym), intent(inout) :: self
+            !! Tensor to initialize.
         real(real64), intent(in) :: vals(4)
+            !! Components in Voigt order (xx, yy, zz, xy).
         self%vals = vals
     end subroutine
 
     pure subroutine init2_ten_2D2Osym(self, xx, yy, zz, xy)
-        !! Initializes a ten_2D2Osym tensor from its 6 individual components.
+        !! Initializes a ten_2D2Osym tensor from its 4 individual components.
         implicit none
         class(ten_2D2Osym), intent(inout) :: self
-        real(real64), intent(in) :: xx, yy, zz, xy
+            !! Tensor to initialize.
+        real(real64), intent(in) :: xx
+            !! Component (1,1).
+        real(real64), intent(in) :: yy
+            !! Component (2,2).
+        real(real64), intent(in) :: zz
+            !! Component (3,3).
+        real(real64), intent(in) :: xy
+            !! Component (1,2) = (2,1) (tensorial shear).
         self%vals = (/xx, yy, zz, xy/)
     end subroutine
 
+    pure function norm_2D2Osym(a) result(res)
+        !! Computes the norm of a ten_2D2Osym tensor.
+        !! Uses a modified L1 norm (shear component weighted by 2):
+        !! norm(a) = |a_11| + |a_22| + |a_33| + 2|a_12|
+        implicit none
+        class(ten_2D2Osym), intent(in) :: a
+            !! Tensor whose norm is computed.
+        real(real64) :: res
+            !! Modified L1 norm.
+
+        res =   abs(a%vals(1)) + abs(a%vals(2)) + abs(a%vals(3)) &
+              + 2*abs(a%vals(4))
+    end function norm_2D2Osym
+
+    pure function is_approx_2D2Osym(a, b, tol) result(res)
+        !! Component-wise approximate equality with a relative tolerance:
+        !! \( |a_I - b_I| \le tol \cdot \max(\max|a|, \max|b|, 10^{-30}) \) for all I.
+        implicit none
+        class(ten_2D2Osym), intent(in) :: a
+            !! First tensor.
+        class(ten_2D2Osym), intent(in) :: b
+            !! Second tensor.
+        real(real64), optional, intent(in) :: tol
+            !! Relative tolerance (default `1E-12`).
+        logical :: res
+            !! `.TRUE.` if both tensors are approximately equal.
+        real(real64), parameter :: EPS_ABS=1e-30
+        real(real64) :: eps_check
+        real(real64) :: tol2
+        real(real64) :: max_val
+
+        tol2 = 1E-12
+        if (present(tol)) tol2 = tol
+        max_val = max(maxval(abs(a%vals)), maxval(abs(b%vals)), EPS_ABS)
+        eps_check = tol2 * max_val
+
+        res = all(abs(a%vals - b%vals) .le. eps_check)
+    end function is_approx_2D2Osym
+
     pure function approx_2D2Osym(a, b) result(res)
         !! `.approx.` Compares two ten_2D2Osym tensors for approximate equality.
-        !! Uses a modified L1 norm (shear components weighted by 2) with relative
-        !! and absolute tolerances (EPS, EPS_ABS).
-        !! norm(a) = |a_11| + |a_22| + |a_33| + 2|a_12|
-        !! Condition: norm(a-b) / max(norm(a), norm(b), EPS_ABS) <= EPS
+        !! Delegates to `is_approx` with its default tolerance.
         implicit none
-        type(ten_2D2Osym), intent(in) :: a, b
+        type(ten_2D2Osym), intent(in) :: a
+            !! First tensor.
+        type(ten_2D2Osym), intent(in) :: b
+            !! Second tensor.
         logical :: res
+            !! `.TRUE.` if both tensors are approximately equal.
 
-        real(real64), parameter :: EPS=1e-7, EPS_ABS=1e-30
-        real(real64) :: norm_a, norm_b, norm_max, norm
-
-        norm_a =   abs(a%vals(1)) + abs(a%vals(2)) + abs(a%vals(3)) &
-                 + 2*abs(a%vals(4))
-        norm_b =   abs(b%vals(1)) + abs(b%vals(2)) + abs(b%vals(3)) &
-                 + 2*abs(b%vals(4))
-
-        norm_max = max(max(norm_a, norm_b), EPS_ABS)
-
-        norm =     abs(a%vals(1)-b%vals(1)) +   abs(a%vals(2)-b%vals(2)) +   abs(a%vals(3)-b%vals(3)) &
-               + 2*abs(a%vals(4)-b%vals(4))
-
-        
-        if (norm/norm_max .gt. EPS) res=.false.
-        if (norm/norm_max .le. EPS) res=.true.
-        
+        res = a%is_approx(b)
     end function approx_2D2Osym
 
     pure function sum_2D2Osym(a, b) result(res)
+        !! Component-wise sum \(\mathbf{a} + \mathbf{b}\).
         implicit none
-        type(ten_2D2Osym), intent(in) :: a, b
+        type(ten_2D2Osym), intent(in) :: a
+            !! First operand.
+        type(ten_2D2Osym), intent(in) :: b
+            !! Second operand.
         type(ten_2D2Osym) :: res
+            !! Sum.
         res%vals = a%vals + b%vals
     end function sum_2D2Osym
 
     pure function sub_2D2Osym(a, b) result(res)
+        !! Component-wise difference \(\mathbf{a} - \mathbf{b}\).
         implicit none
-        type(ten_2D2Osym), intent(in) :: a, b
+        type(ten_2D2Osym), intent(in) :: a
+            !! Minuend.
+        type(ten_2D2Osym), intent(in) :: b
+            !! Subtrahend.
         type(ten_2D2Osym) :: res
+            !! Difference.
         res%vals = a%vals - b%vals
     end function sub_2D2Osym
 
     pure function subU_2D2Osym(a) result(res)
+        !! Unary negation \(-\mathbf{a}\).
         implicit none
         type(ten_2D2Osym), intent(in) :: a
+            !! Operand.
         type(ten_2D2Osym) :: res
+            !! Negated tensor.
         res%vals = -a%vals
     end function subU_2D2Osym
 
     pure function mul_real64_2D2Osym(a, b) result(res)
+        !! Scalar product \(a\,\mathbf{b}\).
         implicit none
         real(real64), intent(in) :: a
+            !! Scalar factor.
         type(ten_2D2Osym), intent(in) :: b
+            !! Tensor.
         type(ten_2D2Osym) :: res
+            !! Scaled tensor.
         res%vals = a * b%vals
     end function mul_real64_2D2Osym
 
     pure function mul_2D2Osym_real64(a, b) result(res)
+        !! Scalar product \(\mathbf{a}\,b\).
         implicit none
-        real(real64), intent(in) :: b
         type(ten_2D2Osym), intent(in) :: a
+            !! Tensor.
+        real(real64), intent(in) :: b
+            !! Scalar factor.
         type(ten_2D2Osym) :: res
+            !! Scaled tensor.
         res%vals =  a%vals * b
     end function mul_2D2Osym_real64
 
     pure function div_2D2Osym_real64(a, b) result(res)
+        !! Scalar division \(\mathbf{a}/b\).
         implicit none
-        real(real64), intent(in) :: b
         type(ten_2D2Osym), intent(in) :: a
+            !! Tensor.
+        real(real64), intent(in) :: b
+            !! Scalar divisor (must be non-zero).
         type(ten_2D2Osym) :: res
+            !! Scaled tensor.
         res%vals = a%vals/b
     end function div_2D2Osym_real64
 
     pure function ddot_2D2Osym_2D2Osym(a, b) result(res)
+        !! Double contraction \(\mathbf{a} : \mathbf{b} = a_{ij} b_{ij}\)
+        !! (the shear product is counted twice).
         implicit none
-        type(ten_2D2Osym), intent(in) :: a, b
+        type(ten_2D2Osym), intent(in) :: a
+            !! First operand.
+        type(ten_2D2Osym), intent(in) :: b
+            !! Second operand.
         real(real64) :: res
+            !! Scalar result.
         res =   a%vals(1)*b%vals(1) &
-                             + a%vals(2)*b%vals(2) &
-                             + a%vals(3)*b%vals(3) &
-                             + 2*a%vals(4)*b%vals(4)
+              + a%vals(2)*b%vals(2) &
+              + a%vals(3)*b%vals(3) &
+              + 2*a%vals(4)*b%vals(4)
     end function ddot_2D2Osym_2D2Osym
 
     pure function dev_2D2Osym(a) result(res)
+        !! Deviatoric part \(\mathbf{a} - \frac{1}{3}\mathrm{tr}(\mathbf{a})\mathbf{I}\).
         implicit none
         type(ten_2D2Osym), intent(in) :: a
+            !! Operand.
         type(ten_2D2Osym) :: res
+            !! Deviatoric tensor.
         real(real64) :: hydro
         hydro = (a%vals(1) + a%vals(2) + a%vals(3))/3D0
         res%vals(1:3) = a%vals(1:3) - hydro
@@ -306,28 +408,35 @@ contains
     end function dev_2D2Osym
 
     pure function square_2D2Osym(a) result(res)
+        !! Square \(\mathbf{a}\cdot\mathbf{a}\) (symmetric for a symmetric tensor).
         implicit none
         class(ten_2D2Osym), intent(in) :: a
+            !! Operand.
         type(ten_2D2Osym) :: res
+            !! Squared tensor.
         res%vals(1) = a%vals(1)**2 + a%vals(4)**2
         res%vals(2) = a%vals(2)**2 + a%vals(4)**2
         res%vals(3) = a%vals(3)**2
         res%vals(4) = a%vals(4)*(a%vals(1) + a%vals(2))
     end function square_2D2Osym
-    
+
     pure function xx(a) result(res)
         !! Accessor function for the xx (11) component (vals(1)).
         implicit none
         class(ten_2D2Osym), intent(in) :: a
+            !! Tensor.
         real(real64) :: res
+            !! Component (1,1).
         res = a%vals(1)
     end function xx
-    
+
     pure function yy(a) result(res)
         !! Accessor function for the yy (22) component (vals(2)).
         implicit none
         class(ten_2D2Osym), intent(in) :: a
+            !! Tensor.
         real(real64) :: res
+            !! Component (2,2).
         res = a%vals(2)
     end function yy
 
@@ -335,7 +444,9 @@ contains
         !! Accessor function for the zz (33) component (vals(3)).
         implicit none
         class(ten_2D2Osym), intent(in) :: a
+            !! Tensor.
         real(real64) :: res
+            !! Component (3,3).
         res = a%vals(3)
     end function zz
 
@@ -343,8 +454,118 @@ contains
         !! Accessor function for the xy (12) component (vals(4)).
         implicit none
         class(ten_2D2Osym), intent(in) :: a
+            !! Tensor.
         real(real64) :: res
+            !! Component (1,2).
         res = a%vals(4)
     end function xy
+
+#ifdef ENABLE_UDTIO
+    subroutine print_ten_2D2Osym(dtv, unit, iotype, v_list, iostat, iomsg)
+        !! Custom I/O formatting for ten_2D2Osym.
+        !! List mode prints the 4 Voigt components; matrix mode prints the full 3x3
+        !! matrix with the vanishing out-of-plane shear terms.
+        class(ten_2D2Osym), intent(in) :: dtv
+            !! Tensor to print.
+        integer, intent(in)            :: unit
+            !! Output unit.
+        character(len=*), intent(in)   :: iotype
+            !! Edit descriptor type (`LISTDIRECTED`, `DT...`).
+        integer, intent(in)            :: v_list(:)
+            !! Optional (width, decimals).
+        integer, intent(out)           :: iostat
+            !! I/O status.
+        character(len=*), intent(inout) :: iomsg
+            !! I/O error message.
+
+        character(len=100) :: fmt_string
+        integer :: w, d
+
+        w = 11
+        d = 4
+        iostat = 0
+
+        if (size(v_list) >= 1) w = v_list(1)
+        if (size(v_list) >= 2) d = v_list(2)
+
+        if (iotype == "DTLIST" .or. iotype == "LIST") then
+            write(fmt_string, "('(A, 4(ES', I0, '.', I0, ', 1X), A)')") w, d
+            write(unit, fmt_string, iostat=iostat) &
+                "[", dtv%xx(), dtv%yy(), dtv%zz(), dtv%xy(), "]"
+        else
+            write(fmt_string, "('(/, 3(ES', I0, '.', I0, ', 2X), /, 3(ES', I0, '.', I0, ', 2X), /, 3(ES', I0, '.', I0, ', 2X))')") &
+                w, d, w, d, w, d
+
+            write(unit, fmt_string, iostat=iostat) &
+                dtv%xx(), dtv%xy(), 0D0,      & ! Row 1
+                dtv%xy(), dtv%yy(), 0D0,      & ! Row 2
+                0D0,      0D0,      dtv%zz()    ! Row 3
+        end if
+
+        if (iostat /= 0) then
+            iomsg = "Error in print_ten_2D2Osym: Failed to write to the specified unit."
+        end if
+    end subroutine print_ten_2D2Osym
+#endif
+
+    pure function det_2D2Osym(self) result(res)
+        !! Determinant of a 2D symmetric 2nd-order tensor:
+        !! \( \det\mathbf{A} = (A_{11}A_{22} - A_{12}^2)\,A_{33} \).
+        implicit none
+        class(ten_2D2Osym), intent(in) :: self
+            !! Tensor.
+        real(real64)                   :: res
+            !! Determinant.
+
+        res = (self%vals(1)*self%vals(2) - self%vals(4)**2) * self%vals(3)
+    end function det_2D2Osym
+
+    pure subroutine inverse_2D2Osym(a, a_inv, ok, cond)
+        !! Inverse of a `ten_2D2Osym` with a success flag (generic `inverse`, also used by `.inv.` and
+        !! `%inv()`).
+        !!
+        !! Inverted as the 3x3 matrix \( [[A_{11}, A_{12}, 0], [A_{12}, A_{22}, 0], [0, 0, A_{33}]] \)
+        !! with `M33INV` (adjugate + \( \kappa_\infty \), LU fallback), then symmetrized. This replaces
+        !! the former absolute singularity test \( |\det| < 10^{-30} \), which wrongly rejected
+        !! well-conditioned tensors of small scale.
+        !!
+        !! If the matrix is singular (or contains NaN): `ok = .false.`, `a_inv` is filled with quiet
+        !! NaN and `cond = huge(1.0D0)`.
+        use muscle_math_inverses, only : M33INV, QUIET_NAN
+        implicit none
+        class(ten_2D2Osym), intent(in) :: a
+            !! Tensor to invert.
+        type(ten_2D2Osym), intent(out) :: a_inv
+            !! Inverse tensor (quiet NaN if `a` is singular).
+        logical, intent(out) :: ok
+            !! `.true.` if the inversion succeeded, `.false.` if `a` is singular.
+        real(real64), intent(out), optional :: cond
+            !! Condition number \( \kappa_\infty \) of the 3x3 matrix that is inverted (from `M33INV`); `huge(1.0D0)` if singular.
+        real(real64) :: m(3,3), x(3,3), kap
+
+        m(:,1) = (/ a%vals(1), a%vals(4), 0.0D0 /)
+        m(:,2) = (/ a%vals(4), a%vals(2), 0.0D0 /)
+        m(:,3) = (/ 0.0D0, 0.0D0, a%vals(3) /)
+        call M33INV(m, x, ok, kap)
+        if (.not. ok) then
+            a_inv%vals = QUIET_NAN()
+            if (present(cond)) cond = huge(1.0D0)
+            return
+        end if
+        a_inv%vals = (/ x(1,1), x(2,2), x(3,3), 0.5D0*(x(1,2) + x(2,1)) /)   ! (xx, yy, zz, xy)
+        if (present(cond)) cond = kap
+    end subroutine inverse_2D2Osym
+
+    pure function inv_2D2Osym(self) result(res)
+        !! `.inv.` and `%inv()`: inverse of a `ten_2D2Osym`; quiet NaN if it is singular (use the
+        !! generic `inverse` to get a success flag and the condition number).
+        implicit none
+        class(ten_2D2Osym), intent(in) :: self
+            !! Tensor to invert.
+        type(ten_2D2Osym) :: res
+            !! Inverse tensor.
+        logical :: ok
+        call inverse_2D2Osym(self, res, ok)
+    end function inv_2D2Osym
 
 end module muscle_tensor_2d2osym
