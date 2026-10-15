@@ -65,32 +65,31 @@ contains
         type(ten_3D2O), intent(in)              :: F
         real(real64) :: F11, F21, F31, F12, F22, F32, F13, F23, F33
         real(real64) :: G11, G21, G31, G12, G22, G32, G13, G23, G33
-        real(real64) :: inv_J, c11, c22, c33, c12, c23, c13
+        real(real64) :: c11, c22, c33, c12, c23, c13
         real(real64) :: b11, b22, b33, b12, b23, b13
         real(real64) :: binv11, binv22, binv33, binv12, binv23, binv13
         real(real64) :: eigC(3)
         type(ten_3D2Osym) :: H_projectors(3), U_inv
         integer :: a
+        logical :: ok
 
         self%F = F
         self%J = F%det()
-        inv_J  = 1.0D0 / self%J
 
         ! 1. Unpack F
         F11 = F%vals(1); F21 = F%vals(2); F31 = F%vals(3)
         F12 = F%vals(4); F22 = F%vals(5); F32 = F%vals(6)
         F13 = F%vals(7); F23 = F%vals(8); F33 = F%vals(9)
 
-        ! 2. Compute F_inv
-        G11 = (F22*F33 - F23*F32)*inv_J; G12 = (F13*F32 - F12*F33)*inv_J; G13 = (F12*F23 - F13*F22)*inv_J
-        G21 = (F23*F31 - F21*F33)*inv_J; G22 = (F11*F33 - F13*F31)*inv_J; G23 = (F13*F21 - F11*F23)*inv_J
-        G31 = (F21*F32 - F22*F31)*inv_J; G32 = (F12*F31 - F11*F32)*inv_J; G33 = (F11*F22 - F12*F21)*inv_J
-
-        call self%F_inv%init( &
-            xx = G11, xy = G12, xz = G13, &
-            yx = G21, yy = G22, yz = G23, &
-            zx = G31, zy = G32, zz = G33  &
-        )
+        ! 2. Compute F_inv with the tensor inverse (adjugate + condition number, LU fallback for
+        !    ill-conditioned F; see M33INV). The former hand-written adjugate had no fallback and
+        !    divided by J = 0 for a singular F.
+        ! TODO: ok is not propagated yet; for a singular F, F_inv (and b_inv) are NaN (see TODO2.md,
+        !       "Cinemática: aviso cuando F es singular o J <= 0").
+        call inverse(F, self%F_inv, ok)
+        G11 = self%F_inv%vals(1); G21 = self%F_inv%vals(2); G31 = self%F_inv%vals(3)
+        G12 = self%F_inv%vals(4); G22 = self%F_inv%vals(5); G32 = self%F_inv%vals(6)
+        G13 = self%F_inv%vals(7); G23 = self%F_inv%vals(8); G33 = self%F_inv%vals(9)
 
         ! 3. Compute C = F^T * F
         c11 = F11*F11 + F21*F21 + F31*F31; c22 = F12*F12 + F22*F22 + F32*F32; c33 = F13*F13 + F23*F23 + F33*F33
