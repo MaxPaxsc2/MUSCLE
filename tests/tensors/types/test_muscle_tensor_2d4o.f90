@@ -140,11 +140,12 @@ subroutine test_2D4O_arith_inverse(passed)
     !! Arithmetic and .inv.: A * inv(A) = I_5 (matrix product of the 5x5 representations).
     !! A is diagonally dominant (cond ~ 3), LU round-off ~1e-15; tol 1e-12.
     use, intrinsic :: iso_fortran_env
+    use, intrinsic :: ieee_arithmetic, only : ieee_is_nan
     use muscle_tensors
     use muscle_test_utils
     implicit none
     logical, intent(out) :: passed
-    type(ten_2D4O) :: a, ainv, zero, r
+    type(ten_2D4O) :: a, ainv, r
     real(real64) :: id5(5,5)
     integer :: i
 
@@ -168,10 +169,10 @@ subroutine test_2D4O_arith_inverse(passed)
     ainv = .inv. a
     call check_approx(passed, "a * inv(a) = I_5", matmul(a%vals, ainv%vals), id5, tol=1D-12)
 
-    ! Singular matrix -> zero tensor
-    zero = 0D0
+    ! Singular matrix -> quiet NaN in every component
     a = 1D0
-    call check_approx(passed, ".inv. (singular) = 0", .inv. a, zero)
+    ainv = .inv. a
+    call check_true(passed, ".inv. (singular) = NaN", all(ieee_is_nan(ainv%vals)))
 end subroutine test_2D4O_arith_inverse
 
 

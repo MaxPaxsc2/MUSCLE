@@ -153,8 +153,11 @@ contains
         use muscle_tensor_3d4o2sym
         implicit none
         type(iden_2O), intent(in) :: I2
+            !! Standard identity tensor \(\mathbf{I}\).
         type(ten_3D2Osym), intent(in) :: a
+            !! Symmetric second-order tensor \(\mathbf{a}\).
         type(ten_3D4O2sym) :: res
+            !! Resulting minor-symmetric fourth-order tensor.
         res%vals = 0.0D0
         res%vals(:,1) = a%vals
         res%vals(:,2) = a%vals
@@ -167,8 +170,11 @@ contains
         use muscle_tensor_3d4o2sym
         implicit none
         type(iden_2O), intent(in) :: I2
+            !! Standard identity tensor \(\mathbf{I}\).
         type(ten_3D2Osym), intent(in) :: a
+            !! Symmetric second-order tensor \(\mathbf{a}\).
         type(ten_3D4O2sym) :: res
+            !! Resulting minor-symmetric fourth-order tensor.
         res%vals = 0.0D0
         res%vals(1,:) = a%vals
         res%vals(2,:) = a%vals
@@ -185,8 +191,11 @@ contains
         !! When called as `a .tdotsym. a`, a modern compiler will optimize this to `a ⊗ a`.
         implicit none
         type(ten_3D2Osym), intent(in) :: a
+            !! First symmetric tensor \(\mathbf{a}\).
         type(ten_3D2Osym), intent(in) :: b
+            !! Second symmetric tensor \(\mathbf{b}\).
         type(ten_3D4O3sym) :: res
+            !! Fully symmetric fourth-order tensor.
         
         res%vals(1)  = 0.5D0 * (a%vals(1)*b%vals(1) + b%vals(1)*a%vals(1))
         res%vals(2)  = 0.5D0 * (a%vals(2)*b%vals(2) + b%vals(2)*a%vals(2))
@@ -273,15 +282,15 @@ contains
 
         ! first row
         res%vals(1) = xx
-        res%vals(7) = 0.5*(xx + yy)
-        res%vals(12) = 0.5*(xx + zz)
+        res%vals(7) = 0.5D0*(xx + yy)
+        res%vals(12) = 0.5D0*(xx + zz)
         res%vals(16) = 0.5D0*xy
         res%vals(19) = 0.5D0*yz
         res%vals(21) = 0.5D0*xz
 
         ! second row
         res%vals(2) = yy
-        res%vals(8) = 0.5*(yy+zz)
+        res%vals(8) = 0.5D0*(yy+zz)
         res%vals(13) = 0.5D0*xy
         res%vals(17) = 0.5D0*yz
         res%vals(20) = 0.5D0*xz
@@ -293,16 +302,16 @@ contains
         res%vals(18) = 0.5D0*xz
 
         ! fourth row
-        res%vals(4) = 0
-        res%vals(10) = 0
-        res%vals(15) = 0
+        res%vals(4) = 0.0D0
+        res%vals(10) = 0.0D0
+        res%vals(15) = 0.0D0
 
         ! fifth row
-        res%vals(5) = 0
-        res%vals(11) = 0
+        res%vals(5) = 0.0D0
+        res%vals(11) = 0.0D0
 
         ! sixth row
-        res%vals(6) = 0
+        res%vals(6) = 0.0D0
 
     end function tdotsym_3D2Osym_I2O
 
@@ -312,8 +321,11 @@ contains
         !! Due to the commutativity of the addition, this is mathematically identical to `a .tdotsym. I2`.
         implicit none
         type(iden_2O),     intent(in) :: I2
+            !! Standard identity tensor \(\mathbf{I}\).
         type(ten_3D2Osym), intent(in) :: a
+            !! Symmetric second-order tensor \(\mathbf{a}\).
         type(ten_3D4O3sym)            :: res
+            !! Fully symmetric fourth-order tensor.
         
         ! Delegate to the primary implementation
         res = tdotsym_3D2Osym_I2O(a, I2)

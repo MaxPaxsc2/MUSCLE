@@ -44,7 +44,8 @@ module muscle_tensor_2d2osym
     !! - `/`: Divides a `ten_2D2Osym` tensor by a `real(real64)` scalar.
     !! - `.dev.`: Computes the deviatoric part of a `ten_2D2Osym` tensor.
     !! - `.ddot.`: Computes the double dot product (scalar result) of two `ten_2D2Osym` tensors.
-    !! - `.inv.`: Computes the analytical inverse of a `ten_2D2Osym` tensor.
+    !! - `.inv.`: Inverse of a `ten_2D2Osym` tensor (also `%inv()`; quiet NaN if singular).
+    !! - `inverse`: `call inverse(a, a_inv, ok [, cond])`, inverse with a success flag and the condition number.
     !!
     !! ### Assignment:
     !!
@@ -151,7 +152,7 @@ module muscle_tensor_2d2osym
             procedure, public :: det => det_2D2Osym
                 !! Computes the determinant of the symmetric 2nd-order tensor.
             procedure, public :: inv => inv_2D2Osym
-                !! Computes the analytical inverse tensor (A^-1).
+                !! Inverse tensor (quiet NaN if singular).
     end type ten_2D2Osym
 
     public :: operator(.approx.)
@@ -207,6 +208,12 @@ module muscle_tensor_2d2osym
         module procedure print_ten_2D2Osym
     end interface
 #endif
+
+    public :: inverse
+    interface inverse
+        !! `call inverse(a, a_inv, ok [, cond])`: inverse with a success flag and condition number.
+        module procedure inverse_2D2Osym
+    end interface
 
 contains
 
@@ -513,35 +520,52 @@ contains
         res = (self%vals(1)*self%vals(2) - self%vals(4)**2) * self%vals(3)
     end function det_2D2Osym
 
+    pure subroutine inverse_2D2Osym(a, a_inv, ok, cond)
+        !! Inverse of a `ten_2D2Osym` with a success flag (generic `inverse`, also used by `.inv.` and
+        !! `%inv()`).
+        !!
+        !! Inverted as the 3x3 matrix \( [[A_{11}, A_{12}, 0], [A_{12}, A_{22}, 0], [0, 0, A_{33}]] \)
+        !! with `M33INV` (adjugate + \( \kappa_\infty \), LU fallback), then symmetrized. This replaces
+        !! the former absolute singularity test \( |\det| < 10^{-30} \), which wrongly rejected
+        !! well-conditioned tensors of small scale.
+        !!
+        !! If the matrix is singular (or contains NaN): `ok = .false.`, `a_inv` is filled with quiet
+        !! NaN and `cond = huge(1.0D0)`.
+        use muscle_math_inverses, only : M33INV, QUIET_NAN
+        implicit none
+        class(ten_2D2Osym), intent(in) :: a
+            !! Tensor to invert.
+        type(ten_2D2Osym), intent(out) :: a_inv
+            !! Inverse tensor (quiet NaN if `a` is singular).
+        logical, intent(out) :: ok
+            !! `.true.` if the inversion succeeded, `.false.` if `a` is singular.
+        real(real64), intent(out), optional :: cond
+            !! Condition number \( \kappa_\infty \) of the 3x3 matrix that is inverted (from `M33INV`); `huge(1.0D0)` if singular.
+        real(real64) :: m(3,3), x(3,3), kap
+
+        m(:,1) = (/ a%vals(1), a%vals(4), 0.0D0 /)
+        m(:,2) = (/ a%vals(4), a%vals(2), 0.0D0 /)
+        m(:,3) = (/ 0.0D0, 0.0D0, a%vals(3) /)
+        call M33INV(m, x, ok, kap)
+        if (.not. ok) then
+            a_inv%vals = QUIET_NAN()
+            if (present(cond)) cond = huge(1.0D0)
+            return
+        end if
+        a_inv%vals = (/ x(1,1), x(2,2), x(3,3), 0.5D0*(x(1,2) + x(2,1)) /)   ! (xx, yy, zz, xy)
+        if (present(cond)) cond = kap
+    end subroutine inverse_2D2Osym
+
     pure function inv_2D2Osym(self) result(res)
-        !! Analytical inverse of a 2D symmetric 2nd-order tensor. The in-plane 2x2
-        !! block and the out-of-plane component are inverted independently:
-        !! \[ \mathbf{A}^{-1} = \frac{1}{A_{11}A_{22}-A_{12}^2}
-        !!    \begin{bmatrix} A_{22} & -A_{12} \\ -A_{12} & A_{11} \end{bmatrix}
-        !!    \oplus \frac{1}{A_{33}} \]
-        !! If \(\det\mathbf{A} \approx 0\) (\(|\det| < 10^{-30}\)), a zero tensor is returned.
+        !! `.inv.` and `%inv()`: inverse of a `ten_2D2Osym`; quiet NaN if it is singular (use the
+        !! generic `inverse` to get a success flag and the condition number).
         implicit none
         class(ten_2D2Osym), intent(in) :: self
             !! Tensor to invert.
-        type(ten_2D2Osym)             :: res
-            !! Inverse tensor (zero if singular).
-
-        real(real64) :: det2, det_val, inv_det2
-        real(real64), parameter :: EPS_DET = 1.0D-30
-
-        det2 = self%vals(1)*self%vals(2) - self%vals(4)**2
-        det_val = det2 * self%vals(3)
-
-        if (abs(det_val) < EPS_DET) then
-            res%vals = 0.0D0
-            return
-        end if
-
-        inv_det2 = 1.0D0 / det2
-        res%vals(1) =  self%vals(2) * inv_det2 ! xx
-        res%vals(2) =  self%vals(1) * inv_det2 ! yy
-        res%vals(3) =  1.0D0 / self%vals(3)    ! zz
-        res%vals(4) = -self%vals(4) * inv_det2 ! xy
+        type(ten_2D2Osym) :: res
+            !! Inverse tensor.
+        logical :: ok
+        call inverse_2D2Osym(self, res, ok)
     end function inv_2D2Osym
 
 end module muscle_tensor_2d2osym

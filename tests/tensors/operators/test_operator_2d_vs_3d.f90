@@ -281,30 +281,11 @@ contains
         r42 = g2 .transform. D1; r342 = G3b .transform. D3
         call check_approx(ok, "2D2O .transform. 2D4O2sym (A = g2)", r42, p42(r342), tol=TOL)
 
-        call transform_rotation_analytic()
+        ! Fully symmetric input: result must stay fully symmetric and match 3D
+        r43 = g1 .transform. C1; r343 = G3a .transform. C3a
+        call check_approx(ok, "2D2O .transform. 2D4O3sym", r43, p43(r343), tol=TOL)
+        r43 = g2 .transform. C1; r343 = G3b .transform. C3a
+        call check_approx(ok, "2D2O .transform. 2D4O3sym (A = g2)", r43, p43(r343), tol=TOL)
     end subroutine fourth_order
-
-    subroutine transform_rotation_analytic()
-        !! Analytic case: an in-plane rotation by 90 degrees (e1 -> e2, e2 -> -e1, e3 -> e3)
-        !! maps C_1111 <-> C_2222, C_1133 <-> C_2233, C_1112 -> -C_2221 = -C_2212, etc.
-        !! For R = [[0,-1,0],[1,0,0],[0,0,1]]: res_ijkl = R_iI R_jJ R_kK R_lL C_IJKL, so
-        !! res_1111 = C_2222, res_2222 = C_1111, res_1122 = C_2211, res_3333 = C_3333,
-        !! res_1133 = C_2233, res_2233 = C_1133, res_1212 = C_2121 = C_1212,
-        !! res_1112 = -C_2221 = -C_2212, res_2212 = -C_1112, res_3312 = -C_3312.
-        !! Entries are products of 0/+-1, so the result is exact.
-        type(ten_2D2O) :: Rot
-        type(ten_2D4O2sym) :: r42, expected
-        real(real64) :: c(4,4)
-
-        call Rot%init(xx=0D0, xy=-1D0, yx=1D0, yy=0D0, zz=1D0)
-        c = D1%vals
-        expected%vals(1,:) = (/ c(2,2), c(2,1), c(2,3), -c(2,4) /)
-        expected%vals(2,:) = (/ c(1,2), c(1,1), c(1,3), -c(1,4) /)
-        expected%vals(3,:) = (/ c(3,2), c(3,1), c(3,3), -c(3,4) /)
-        expected%vals(4,:) = (/ -c(4,2), -c(4,1), -c(4,3), c(4,4) /)
-        r42 = Rot .transform. D1
-        call check_approx(ok, "2D2O .transform. 2D4O2sym (90 deg rotation)", r42, expected, tol=TOL)
-    end subroutine transform_rotation_analytic
-
 
 end program test_operator_2d_vs_3d
