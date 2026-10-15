@@ -106,10 +106,11 @@ contains
     end function dstressEq_dstress_yld2004
 
     pure function ddstressEq_ddstress_yld2004(self, stress) result(res)
-        !! Analytical Hessian L'^T H' L' + L''^T H'' L'' + L'^T M L'' + (L'^T M L'')^T
-        !! (Barlat et al., 2005, Eqs. 11 and 14). H' and H'' come from spectral_hessian, each with
-        !! the other tensor fixed. The cross term M = sum_ij d2f/dlam'_i dlam''_j E'_i (x) E''_j,
-        !! with E'_i = v'_i (x) v'_i, has no eigenvector-rotation part: E'_i does not depend on S''.
+        !! Analytical Hessian Lp^T Hp Lp + Lpp^T Hpp Lpp + Lp^T M Lpp + (Lp^T M Lpp)^T
+        !! (Barlat et al., 2005, Eqs. 11 and 14), where the suffixes p and pp mark the single- and
+        !! double-primed quantities of the paper. Hp and Hpp come from spectral_hessian, each with
+        !! the other tensor fixed. The cross term M = sum_ij d2f/dlp_i dlpp_j Ep_i (x) Epp_j,
+        !! with Ep_i = vp_i (x) vp_i, has no eigenvector-rotation part: Ep_i does not depend on Spp.
         !! Called by the return mapping through the ddstressEq_ddstress binding.
         use muscle_math_spectral_derivs, only : spectral_decomposition, spectral_gradient, &
                                                 spectral_hessian
@@ -125,8 +126,8 @@ contains
         call spectral_decomposition(linear_transform(self%Lp, self%cp_shear, stress), lp, Vp)
         call spectral_decomposition(linear_transform(self%Lpp, self%cpp_shear, stress), lpp, Vpp)
         call principal_derivatives(self, lp, lpp, dfp, dfpp, d2fp, d2fpp, d2fx)
-        ! Cross term: L'^T M L'' + (L'^T M L'')^T = sum_i 2 sym(A_i (x) B_i), with
-        ! A_i = L'^T : E'_i and B_i = L''^T : sum_j d2f/dlam'_i dlam''_j E''_j
+        ! Cross term: Lp^T M Lpp + (Lp^T M Lpp)^T = sum_i 2 sym(A_i (x) B_i), with
+        ! A_i = Lp^T : Ep_i and B_i = Lpp^T : sum_j d2f/dlp_i dlpp_j Epp_j
         a1 = pull_back(self%Lp, self%cp_shear, spectral_gradient(Vp, [1D0, 0D0, 0D0]))
         a2 = pull_back(self%Lp, self%cp_shear, spectral_gradient(Vp, [0D0, 1D0, 0D0]))
         a3 = pull_back(self%Lp, self%cp_shear, spectral_gradient(Vp, [0D0, 0D0, 1D0]))
@@ -141,10 +142,11 @@ contains
     pure subroutine principal_derivatives(self, lp, lpp, dfp, dfpp, d2fp, d2fpp, d2fx)
         ! Derivatives of f = (phi/4)**(1/a) with respect to lam'_i and lam''_j (Barlat et al.,
         ! 2005, Eq. 14). With d_ij = lam'_i - lam''_j and h(d) = |d|**a: df/dlam'_i =
-        ! c sum_j h'(d_ij) and df/dlam''_j = -c sum_i h'(d_ij), c = f/(a phi), and
-        ! d2f/dx dy = c d2phi/dx dy + (1 - a) (df/dx) (df/dy)/f over x, y in (lam', lam''), with
-        ! d2phi/dlam'_i dlam''_j = -h''(d_ij) and the sums of h'' on the diagonal blocks.
-        ! |d_ij|**(a-2) is the only real power per pair: h = p d**2, h' = a p d, h'' = a (a-1) p.
+        ! c sum_j h'(d_ij) and df/dlam''_j = -c sum_i h'(d_ij), c = f/(a phi).
+        ! |d_ij|**(a-2) is the only real power per pair: h = p d**2, h' = a p d.
+        ! Second derivatives, over x, y in (lp, lpp) (lam with one and two primes):
+        ! d2f/dx dy = c d2phi/dx dy + (1 - a) (df/dx) (df/dy)/f, with d2phi/dlp_i dlpp_j = -d2h(d_ij),
+        ! d2h = a (a-1) p the second derivative of h, and the sums of d2h on the diagonal blocks.
         ! Called by the analytical derivatives.
         implicit none
         class(Yld2004), intent(in) :: self
@@ -152,9 +154,9 @@ contains
         real(real64), intent(in) :: lpp(3)    ! lam''
         real(real64), intent(out) :: dfp(3)   ! df/dlam'_i
         real(real64), intent(out) :: dfpp(3)  ! df/dlam''_j
-        real(real64), intent(out), optional :: d2fp(3,3)   ! d2f/dlam'_i dlam'_k
-        real(real64), intent(out), optional :: d2fpp(3,3)  ! d2f/dlam''_j dlam''_l
-        real(real64), intent(out), optional :: d2fx(3,3)   ! d2f/dlam'_i dlam''_j
+        real(real64), intent(out), optional :: d2fp(3,3)   ! d2f/dlp_i dlp_k
+        real(real64), intent(out), optional :: d2fpp(3,3)  ! d2f/dlpp_j dlpp_l
+        real(real64), intent(out), optional :: d2fx(3,3)   ! d2f/dlp_i dlpp_j
 
         real(real64) :: d(3,3), p(3,3), dh(3,3), phi, f, c, g, q
 
@@ -202,7 +204,7 @@ contains
         dfpp(3) = -c*(dh(1,3) + dh(2,3) + dh(3,3))
         if (.not. present(d2fp)) return
 
-        ! c h''(d_ij) = q p_ij, stored in p
+        ! c d2h(d_ij) = q p_ij, stored in p
         q = c*self%a*(self%a - 1D0)
         p(1,1) = q*p(1,1)
         p(1,2) = q*p(1,2)
