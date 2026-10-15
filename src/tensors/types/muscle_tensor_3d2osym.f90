@@ -498,9 +498,9 @@ contains
             !! Condition number \( \kappa_\infty \) of the 3x3 matrix that is inverted (from `M33INV`); `huge(1.0D0)` if singular.
         real(real64) :: m(3,3), x(3,3), kap
 
-        m = reshape((/ a%vals(1), a%vals(4), a%vals(6), &
-                       a%vals(4), a%vals(2), a%vals(5), &
-                       a%vals(6), a%vals(5), a%vals(3) /), (/3,3/))
+        m(:,1) = (/ a%vals(1), a%vals(4), a%vals(6) /)
+        m(:,2) = (/ a%vals(4), a%vals(2), a%vals(5) /)
+        m(:,3) = (/ a%vals(6), a%vals(5), a%vals(3) /)
         call M33INV(m, x, ok, kap)
         if (.not. ok) then
             a_inv%vals = QUIET_NAN()

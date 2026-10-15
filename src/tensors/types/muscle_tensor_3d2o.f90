@@ -488,15 +488,16 @@ contains
             !! `.true.` if the inversion succeeded, `.false.` if `a` is singular.
         real(real64), intent(out), optional :: cond
             !! Condition number \( \kappa_\infty \) of the 3x3 matrix that is inverted (from `M33INV`); `huge(1.0D0)` if singular.
-        real(real64) :: x(3,3), kap
+        real(real64) :: m(3,3), x(3,3), kap
 
-        call M33INV(reshape(a%vals, (/3,3/)), x, ok, kap)
+        m(:,1) = a%vals(1:3); m(:,2) = a%vals(4:6); m(:,3) = a%vals(7:9)
+        call M33INV(m, x, ok, kap)
         if (.not. ok) then
             a_inv%vals = QUIET_NAN()
             if (present(cond)) cond = huge(1.0D0)
             return
         end if
-        a_inv%vals = reshape(x, (/9/))
+        a_inv%vals(1:3) = x(:,1); a_inv%vals(4:6) = x(:,2); a_inv%vals(7:9) = x(:,3)
         if (present(cond)) cond = kap
     end subroutine inverse_3D2O
 

@@ -402,11 +402,10 @@ contains
         real(real64) :: mat_a(4,4), x(4,4), v(10), kap
 
         v = a%vals
-        mat_a = reshape((/  v(1),  v(5),  v(8), v(10), &
-                            v(5),  v(2),  v(6),  v(9), &
-                            v(8),  v(6),  v(3),  v(7), &
-                           v(10),  v(9),  v(7),  v(4)  &
-                        /), (/4,4/))
+        mat_a(:,1) = (/ v(1), v(5), v(8), v(10) /)
+        mat_a(:,2) = (/ v(5), v(2), v(6), v(9) /)
+        mat_a(:,3) = (/ v(8), v(6), v(3), v(7) /)
+        mat_a(:,4) = (/ v(10), v(9), v(7), v(4) /)
         call M44INV(mat_a, x, ok, kap)
         if (.not. ok) then
             a_inv%vals = QUIET_NAN()

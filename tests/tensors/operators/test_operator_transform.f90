@@ -190,7 +190,8 @@ subroutine test_transform_3D2O_3D2Osym_roundtrip(passed)
     !! Push-forward followed by pull-back: \( \mathbf{F}^{-1} .transform. (\mathbf{F} .transform.
     !! \mathbf{S}) = \mathbf{S} \), since \( \mathbf{F}^{-1}\mathbf{F}\,\mathbf{S}\,\mathbf{F}^T
     !! \mathbf{F}^{-T} = \mathbf{S} \). F is general with an exact inverse (see
-    !! `general_F_and_inverse`). Two chained transforms of O(1) data: round-off ~1e-15
+    !! `general_F_and_inverse`); the same identity is also checked
+    !! with the library inverse `.inv. F`. Two chained transforms of O(1) data: round-off ~1e-15
     !! relative; tol 1e-13.
     use, intrinsic :: iso_fortran_env
     use muscle_tensors
@@ -207,6 +208,9 @@ subroutine test_transform_3D2O_3D2Osym_roundtrip(passed)
                       F_inv .transform. (F .transform. S), S, tol=1D-13)
     call check_approx(passed, "F .transform. (F^-1 .transform. S) = S", &
                       F .transform. (F_inv .transform. S), S, tol=1D-13)
+    ! Integration check with the library inverse (.inv. of ten_3D2O): same bound
+    call check_approx(passed, "(.inv. F) .transform. (F .transform. S) = S", &
+                      (.inv. F) .transform. (F .transform. S), S, tol=1D-13)
 end subroutine test_transform_3D2O_3D2Osym_roundtrip
 
 
@@ -458,6 +462,9 @@ subroutine test_transform_3D2O_3D4O2sym_roundtrip(passed)
                       A_inv .transform. (A .transform. C), C, tol=1D-13)
     call check_approx(passed, "A .transform. (A^-1 .transform. C) = C", &
                       A .transform. (A_inv .transform. C), C, tol=1D-13)
+    ! Integration check with the library inverse (.inv. of ten_3D2O): same bound
+    call check_approx(passed, "(.inv. A) .transform. (A .transform. C) = C", &
+                      (.inv. A) .transform. (A .transform. C), C, tol=1D-13)
 end subroutine test_transform_3D2O_3D4O2sym_roundtrip
 
 
