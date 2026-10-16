@@ -232,6 +232,7 @@ subroutine test_history_partial_init(passed)
     history%state_np1%strain_p = strain_p_np1
     call stress%init(xx=120D0, yy=-30D0, zz=15D0, xy=8D0, yz=-11D0, xz=6D0)
     call history%init(stress=stress, strain_pf=0.125D0)
+    ! init only copies values (no arithmetic), so every comparison is exact: tol = 0
     call check_approx(passed, 'partial init: committed plastic strain', history%state_n%strain_p, strain_p_n, tol=0D0)
     call check_approx(passed, 'partial init: candidate plastic strain', history%state_np1%strain_p, strain_p_np1, tol=0D0)
     call check_approx(passed, 'partial init: committed stress', history%state_n%stress, stress, tol=0D0)
