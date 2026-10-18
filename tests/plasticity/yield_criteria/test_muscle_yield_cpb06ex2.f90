@@ -18,6 +18,10 @@ program test_muscle_yield_cpb06ex2
     if (.not. passed) STOP 6
     call test_CPB06ex2_gradient_analytical(passed)
     if (.not. passed) STOP 7
+    call test_CPB06ex2_hessian_vs_numeric(passed)
+    if (.not. passed) STOP 8
+    call test_CPB06ex2_hessian_analytical(passed)
+    if (.not. passed) STOP 9
     print*, "Passed!", passed
     STOP 0
 end program test_muscle_yield_cpb06ex2
@@ -81,7 +85,7 @@ subroutine CPB06ex2_test_materials(yld)
     ! The shear order yz,xz,xy of the paper is permuted to library xy,yz,xz.
     ! AZ31B lacks out-of-plane shear data: unit factors there are synthetic test inputs.
     ! Called by test_CPB06ex2_paper_tables, test_CPB06ex2_tension_compression_asymmetry,
-    ! test_CPB06ex2_pressure_insensitive and the gradient tests
+    ! test_CPB06ex2_pressure_insensitive and the gradient and Hessian tests
     use muscle_yield_cpb06ex2
     implicit none
     type(CPB06ex2), intent(out) :: yld(3)
@@ -246,3 +250,96 @@ subroutine test_CPB06ex2_gradient_analytical(passed)
     call check_approx(passed, 'gradient vs reference: 6111-T4', yld(2)%dstressEq_dstress(s), &
                       expected, tol=TOL)
 end subroutine test_CPB06ex2_gradient_analytical
+
+subroutine test_CPB06ex2_hessian_vs_numeric(passed)
+    ! Hessian against the finite-difference Hessian of the base class, for the three
+    ! materials in a state with normal and shear components together (it fills the
+    ! normal-shear entries and the mixed block between Sigma and Sigmap)
+    ! Called by program test_muscle_yield_cpb06ex2 (STOP 8)
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_yield_cpb06ex2
+    use muscle_test_utils
+    implicit none
+    logical, intent(out) :: passed
+    ! Central second differences of the base class: rounding of eps*f/h**2 and a truncation
+    ! O(h**2) that grows with a. Measured: 2.3e-7 or less
+    real(real64), parameter :: TOL = 1D-6
+    type(CPB06ex2) :: yld(3)
+    type(ten_3D2Osym) :: s
+    passed = .true.
+    call CPB06ex2_test_materials(yld)
+    call s%init((/120.5D0,-35.25D0,60.75D0,42.5D0,-28D0,33.25D0/))
+    ! Steel: k and kp of opposite sign, a = 5
+    call check_approx(passed, 'Hessian vs numeric: steel', yld(1)%ddstressEq_ddstress(s), &
+                      yld(1)%ddstressEq_ddstress_numeric(s), tol=TOL)
+    ! 6111-T4: a = 12, the largest powers of the three
+    call check_approx(passed, 'Hessian vs numeric: 6111-T4', yld(2)%ddstressEq_ddstress(s), &
+                      yld(2)%ddstressEq_ddstress_numeric(s), tol=TOL)
+    ! AZ31B: kp = 0.9, the second transformation almost one-sided
+    call check_approx(passed, 'Hessian vs numeric: AZ31B', yld(3)%ddstressEq_ddstress(s), &
+                      yld(3)%ddstressEq_ddstress_numeric(s), tol=TOL)
+end subroutine test_CPB06ex2_hessian_vs_numeric
+
+subroutine test_CPB06ex2_hessian_analytical(passed)
+    ! Hessian against analytical values: the 21 components for 6111-T4 against an independent
+    ! 90-digit reference, von Mises in the isotropic limit at a zero principal value, and the
+    ! mean of the one-sided curvatures at a zero principal value with k, kp /= 0
+    ! Called by program test_muscle_yield_cpb06ex2 (STOP 9)
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_yield_cpb06ex2
+    use muscle_yield_vonmises
+    use muscle_test_utils
+    implicit none
+    logical, intent(out) :: passed
+    ! Exact references: round-off only. Measured: 8.8e-16 or less
+    real(real64), parameter :: TOL = 1D-12
+    type(CPB06ex2) :: yld(3), iso, az
+    type(VonMises) :: vm
+    type(ten_3D2Osym) :: s
+    type(ten_3D4O3sym) :: expected
+    passed = .true.
+    call CPB06ex2_test_materials(yld)
+    ! 6111-T4, all components: reference computed with traces of powers of Sigma and Sigmap
+    ! in 90-digit arithmetic (no eigenvalues)
+    call s%init((/120.5D0,-35.25D0,60.75D0,42.5D0,-28D0,33.25D0/))
+    call expected%init((/3.448675381240494907D-03, 2.429944194238824531D-03, &
+                         5.686182425050850114D-03, 3.890903566445265936D-03, &
+                         4.758349797967605446D-03, 3.843197135993091807D-03, &
+                         -9.621857521423459413D-05, -2.333725619024589869D-03, &
+                         6.862937982881940494D-04, -6.260620910707611047D-04, &
+                         1.638792459368608933D-03, -3.352456806026260245D-03, &
+                         1.406435033139943414D-03, -3.900271823623490557D-04, &
+                         -1.589894276519464777D-03, -2.092728831428137572D-03, &
+                         -1.203204133117417298D-03, -1.562479102753076962D-03, &
+                         1.593231315479766300D-03, 7.834179435264228015D-04, &
+                         7.790611592266542687D-04/))
+    call check_approx(passed, 'Hessian vs reference: 6111-T4', yld(2)%ddstressEq_ddstress(s), &
+                      expected, tol=TOL)
+    ! Isotropic limit with a = 2, pure shear xy: one principal value is exactly zero, where
+    ! the curvature has a finite limit
+    call iso%init(1D0,0D0,0D0,0D0,1D0,0D0,0D0,0D0,1D0,1D0,1D0,1D0,0D0, &
+                  1D0,0D0,0D0,0D0,1D0,0D0,0D0,0D0,1D0,1D0,1D0,1D0,0D0,2D0)
+    call s%init((/0D0,0D0,0D0,50D0,0D0,0D0/))
+    call check_approx(passed, 'Hessian vs von Mises: isotropic, zero principal value', &
+                      iso%ddstressEq_ddstress(s), vm%ddstressEq_ddstress(s), tol=TOL)
+    ! AZ31B maps with a = 2 under pure shear xy: with k, kp /= 0 the zero principal value has
+    ! no classical Hessian, and curvature takes the mean of the one-sided values. Reference:
+    ! symmetric second differences of Eq. (8) in 90-digit arithmetic, which give that mean
+    ! independently of the spectral formula
+    call az%init(0.771D0,-0.914D0,-1.312D0,-0.914D0,0.654D0,-1.209D0, &
+                 -1.312D0,-1.209D0,-0.293D0, &
+                 1.617D0,1D0,1D0,0.295D0, &
+                 0.771D0,0.337D0,-0.764D0,0.337D0,0.646D0,-0.401D0,-0.764D0,-0.401D0,-0.022D0, &
+                 0.499D0,1D0,1D0,0.900D0,2D0)
+    call expected%init((/1.607067269481341886D-02, 1.104520186736500050D-02, &
+                         1.654252201683665822D-02, 0D0, &
+                         8.379554812243580838D-03, 8.379554812243580838D-03, &
+                         -5.286676272670880566D-03, -5.758525594694119934D-03, &
+                         0D0, 0D0, &
+                         -6.913000751205860530D-03, -1.078399642214253829D-02, &
+                         0D0, 0D0, 0D0, 0D0, 0D0, 0D0, 0D0, 0D0, 0D0/))
+    call check_approx(passed, 'Hessian vs reference: AZ31B maps, a = 2, zero principal value', &
+                      az%ddstressEq_ddstress(s), expected, tol=TOL)
+end subroutine test_CPB06ex2_hessian_analytical
