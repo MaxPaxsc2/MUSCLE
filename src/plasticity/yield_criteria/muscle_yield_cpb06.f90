@@ -195,8 +195,8 @@ module muscle_yield_cpb06
             c = 0D0  ! |k| = 1: h = 0 on this side of lam = 0
         else
             ! lam = 0: for a = 2, mean of the one-sided values (1 - k)**2 and (1 + k)**2;
-            ! 0 for a > 2. For 1 <= a < 2 h'' is not bounded at 0 (and for a = 1 neither is
-            ! h'): the values returned there are finite, not derivatives.
+            ! 0 for a > 2. For 1 <= a < 2 the second derivative of h is not bounded at 0 (and
+            ! for a = 1 the first): the values returned there are finite, not derivatives.
             c = merge(1D0 + self%k**2, 0D0, self%a <= 2D0)
         end if
     end function curvature
