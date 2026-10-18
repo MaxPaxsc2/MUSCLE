@@ -20,6 +20,18 @@ program test_muscle_solver_closest_point
     call test_closest_point_keeps_state_n(passed)
     if (.not. passed) STOP 6
 
+    call test_closest_point_vonmises_elastic_status(passed)
+    if (.not. passed) STOP 7
+
+    call test_closest_point_vonmises_first_update(passed)
+    if (.not. passed) STOP 8
+
+    call test_closest_point_vonmises_iteration_limit(passed)
+    if (.not. passed) STOP 9
+
+    call test_closest_point_vonmises_rollback_retry(passed)
+    if (.not. passed) STOP 10
+
     print*, "Passed!", passed
 end program test_muscle_solver_closest_point
 
@@ -515,3 +527,204 @@ subroutine test_closest_point_keeps_state_n(passed)
         return
     end if
 end subroutine test_closest_point_keeps_state_n
+
+
+subroutine test_closest_point_vonmises_elastic_status(passed)
+    !! An elastic step returns STATUS_ELASTIC_CASE and zero Newton iterations.
+    ! All six strain components are nonzero, with three distinct tensorial shears; the trial
+    ! von Mises stress (17.8) is below the initial yield stress y0 = 200.
+    use muscle_tensors, only : ten_3D2Osym
+    use muscle_hard_bilinear, only : Bilinear_hardening
+    use muscle_yield_vonmises, only : VonMises
+    use muscle_elasticity_linear, only : Elasticity_linear
+    use muscle_plastic_history, only : Plastic_material_history
+    use muscle_solver_closest_point, only : Closest_point, STATUS_ELASTIC_CASE
+    use muscle_test_utils, only : check_true
+    implicit none
+    logical, intent(out) :: passed
+    type(Elasticity_linear) :: elas
+    type(Bilinear_hardening) :: linear
+    type(VonMises) :: vm
+    type(Plastic_material_history) :: history
+    type(Closest_point) :: solver
+    type(ten_3D2Osym) :: strain
+    integer :: status, iters
+
+    passed = .true.
+    call elas%set_parameters(young=70000D0, poisson=0.33D0)
+    linear = Bilinear_hardening(y0=200D0, k=1000D0)
+    call solver%init(elasticity=elas, hardening=linear, yield=vm)
+    call strain%init(xx=2D-4, yy=-6D-5, zz=-1D-4, xy=8D-5, yz=-4D-5, xz=6D-5)
+    call solver%solve(strain=strain, history=history, status=status, iters=iters)
+    call check_true(passed, "Elastic status", status == STATUS_ELASTIC_CASE)
+    call check_true(passed, "Elastic iterations", iters == 0)
+end subroutine test_closest_point_vonmises_elastic_status
+
+
+subroutine test_closest_point_vonmises_first_update(passed)
+    !! One Newton update (iter_nw = 1) with linear hardening equals the closed-form radial return.
+    ! Coupled normal and shear strains include pressure in a plastic trial state.
+    ! Simo and Hughes (1998), Box 3.1 and Remark 3.3.2: with linear hardening of slope H,
+    ! Newton reaches the radial return in one update; dg = (q_trial - y0)/(3G + H).
+    use, intrinsic :: iso_fortran_env, only : real64
+    use muscle_tensors, only : ten_3D2Osym, iden_2O, operator(*), operator(+), &
+                              operator(.ddot.), operator(.dev.)
+    use muscle_hard_bilinear, only : Bilinear_hardening
+    use muscle_yield_vonmises, only : VonMises
+    use muscle_elasticity_linear, only : Elasticity_linear
+    use muscle_plastic_history, only : Plastic_material_history
+    use muscle_solver_closest_point, only : Closest_point, STATUS_NONCONVERGED
+    use muscle_test_utils, only : check_approx, check_true
+    implicit none
+    logical, intent(out) :: passed
+    ! Relative plastic strain error against radial return. Measured: 1.35e-16 or less.
+    real(real64), parameter :: TOL_STRAIN_P = 1D-12
+    ! Relative equivalent strain error (tol = TOL_PF*dg, as dg < 1). Measured: 1.12e-16 or less.
+    real(real64), parameter :: TOL_PF = 1D-12
+    type(Elasticity_linear) :: elas
+    type(Bilinear_hardening) :: linear
+    type(VonMises) :: vm
+    type(Plastic_material_history) :: history
+    type(Closest_point) :: solver
+    type(ten_3D2Osym) :: strain, trial, deviator
+    real(real64) :: g, lame ! Lame moduli G and lambda.
+    real(real64) :: q_trial, dg ! Trial equivalent stress and equivalent plastic strain increment.
+    integer :: status
+
+    passed = .true.
+    call elas%set_parameters(young=70000D0, poisson=0.33D0)
+    linear = Bilinear_hardening(y0=200D0, k=1000D0)
+    call solver%init(elasticity=elas, hardening=linear, yield=vm, iter_nw=1)
+    call strain%init(xx=2D-4, yy=-6D-5, zz=-1D-4, xy=8D-5, yz=-4D-5, xz=6D-5)
+    strain = 20D0*strain
+    g = 70000D0/(2D0*(1D0 + 0.33D0))
+    lame = 70000D0*0.33D0/((1D0 + 0.33D0)*(1D0 - 2D0*0.33D0))
+    trial = 2D0*g*strain + lame*(strain .ddot. iden_2O())*iden_2O()
+    deviator = .dev. trial
+    q_trial = sqrt(1.5D0*(deviator .ddot. deviator))
+    dg = (q_trial - 200D0)/(3D0*g + 1000D0)
+    call solver%solve(strain=strain, history=history, status=status)
+    ! With iter_nw = 1 the solver stops before the iteration that checks convergence.
+    call check_true(passed, "One update status", status == STATUS_NONCONVERGED)
+    call check_approx(passed, "Plastic strain after one update", history%state_np1%strain_p, &
+                      (1.5D0*dg/q_trial)*deviator, tol=TOL_STRAIN_P)
+    call check_approx(passed, "Equivalent plastic strain after one update", &
+                      history%state_np1%strain_pf, dg, tol=TOL_PF*dg)
+end subroutine test_closest_point_vonmises_first_update
+
+
+subroutine test_closest_point_vonmises_iteration_limit(passed)
+    !! iter_nw = k - 1 does not converge; iter_nw = k converges with the default history.
+    ! Nonlinear Swift hardening needs several iterations, including the convergence check.
+    ! Measured: k = 4 (Release and Debug).
+    use, intrinsic :: iso_fortran_env, only : real64
+    use muscle_tensors, only : ten_3D2Osym
+    use muscle_hard_swift, only : Swift_hardening
+    use muscle_yield_vonmises, only : VonMises
+    use muscle_elasticity_linear, only : Elasticity_linear
+    use muscle_plastic_history, only : Plastic_material_history
+    use muscle_solver_closest_point, only : Closest_point, STATUS_CONVERGED, STATUS_NONCONVERGED
+    use muscle_test_utils, only : check_approx, check_true
+    implicit none
+    logical, intent(out) :: passed
+    ! Same operations in the same order give identical packed histories. Measured: 0.
+    real(real64), parameter :: TOL_SAME_HISTORY = 0D0
+    type(Elasticity_linear) :: elas
+    type(Swift_hardening) :: hardening
+    type(VonMises) :: vm
+    type(Plastic_material_history) :: base, short, exact
+    type(Closest_point) :: solver, limited
+    type(ten_3D2Osym) :: strain
+    real(real64) :: eps_y, base_hsv(13), exact_hsv(13)
+    integer :: status, iters, k
+
+    passed = .true.
+    call elas%set_parameters(young=70000D0, poisson=0.33D0)
+    hardening = Swift_hardening(k=500D0, n=0.2D0, e0=0.01D0)
+    eps_y = hardening%stress(0D0)/70000D0
+    call strain%init(xx=2D0*eps_y, yy=-0.75D0*eps_y, zz=-1.25D0*eps_y, &
+                     xy=eps_y, yz=-0.5D0*eps_y, xz=0.75D0*eps_y)
+    call solver%init(elasticity=elas, hardening=hardening, yield=vm)
+    call solver%solve(strain=strain, history=base, status=status, iters=k)
+    call check_true(passed, "Default convergence", status == STATUS_CONVERGED)
+    call check_true(passed, "Multiple Newton iterations", k >= 2)
+    call limited%init(elasticity=elas, hardening=hardening, yield=vm, iter_nw=k - 1)
+    call limited%solve(strain=strain, history=short, status=status)
+    call check_true(passed, "Below limit status", status == STATUS_NONCONVERGED)
+    call limited%init(elasticity=elas, hardening=hardening, yield=vm, iter_nw=k)
+    call limited%solve(strain=strain, history=exact, status=status, iters=iters)
+    call check_true(passed, "At limit status", status == STATUS_CONVERGED)
+    call check_true(passed, "At limit iterations", iters == k)
+    call base%pack_to_fea(base_hsv)
+    call exact%pack_to_fea(exact_hsv)
+    call check_approx(passed, "Same history at the limit", exact_hsv, base_hsv, &
+                      tol=TOL_SAME_HISTORY)
+end subroutine test_closest_point_vonmises_iteration_limit
+
+
+subroutine test_closest_point_vonmises_rollback_retry(passed)
+    !! A failed step, rollback and a smaller retry end with the history of a clean path.
+    ! A failed large step precedes a smaller retry from a nonvirgin plastic state.
+    use, intrinsic :: iso_fortran_env, only : real64
+    use muscle_tensors, only : ten_3D2Osym, operator(*)
+    use muscle_hard_swift, only : Swift_hardening
+    use muscle_yield_vonmises, only : VonMises
+    use muscle_elasticity_linear, only : Elasticity_linear
+    use muscle_plastic_history, only : Plastic_material_history
+    use muscle_solver_closest_point, only : Closest_point, STATUS_CONVERGED, STATUS_NONCONVERGED
+    use muscle_test_utils, only : check_approx, check_true
+    implicit none
+    logical, intent(out) :: passed
+    ! Same operations in the same order give identical packed histories. Measured: 0.
+    real(real64), parameter :: TOL_SAME_HISTORY = 0D0
+    type(Elasticity_linear) :: elas
+    type(Swift_hardening) :: hardening
+    type(VonMises) :: vm
+    type(Plastic_material_history) :: base, clean, retry
+    type(Closest_point) :: solver, limited
+    type(ten_3D2Osym) :: strain, strain_3, strain_4
+    real(real64) :: eps_y, clean_hsv(13), retry_hsv(13)
+    integer :: status
+
+    passed = .true.
+    call elas%set_parameters(young=70000D0, poisson=0.33D0)
+    hardening = Swift_hardening(k=500D0, n=0.2D0, e0=0.01D0)
+    eps_y = hardening%stress(0D0)/70000D0
+    call strain%init(xx=2D0*eps_y, yy=-0.75D0*eps_y, zz=-1.25D0*eps_y, &
+                     xy=eps_y, yz=-0.5D0*eps_y, xz=0.75D0*eps_y)
+    call solver%init(elasticity=elas, hardening=hardening, yield=vm)
+    call limited%init(elasticity=elas, hardening=hardening, yield=vm, iter_nw=1)
+    call solver%solve(strain=strain, history=base, status=status)
+    call check_true(passed, "Starting step converged", status == STATUS_CONVERGED)
+    call base%commit()
+    clean = base
+    retry = base
+    strain_3 = 1.5D0*strain
+    strain_4 = 2D0*strain
+    call solver%solve(strain=strain_3, history=clean, status=status)
+    call check_true(passed, "Clean smaller step converged", status == STATUS_CONVERGED)
+    call clean%commit()
+    call solver%solve(strain=strain_4, history=clean, status=status)
+    call check_true(passed, "Clean final step converged", status == STATUS_CONVERGED)
+    call clean%commit()
+    call limited%solve(strain=strain_4, history=retry, status=status)
+    call check_true(passed, "Forced attempt failed", status == STATUS_NONCONVERGED)
+    call retry%rollback()
+    call base%pack_to_fea(clean_hsv)
+    call retry%pack_to_fea(retry_hsv)
+    call check_approx(passed, "History after rollback", retry_hsv, clean_hsv, tol=TOL_SAME_HISTORY)
+    call solver%solve(strain=strain_3, history=retry, status=status)
+    call check_true(passed, "Smaller retry converged", status == STATUS_CONVERGED)
+    call retry%commit()
+    call solver%solve(strain=strain_4, history=retry, status=status)
+    call check_true(passed, "Final retry converged", status == STATUS_CONVERGED)
+    call retry%commit()
+    call clean%pack_to_fea(clean_hsv)
+    call retry%pack_to_fea(retry_hsv)
+    call check_approx(passed, "Same final history", retry_hsv, clean_hsv, tol=TOL_SAME_HISTORY)
+    clean%state_np1 = clean%state_n
+    retry%state_np1 = retry%state_n
+    call clean%pack_to_fea(clean_hsv)
+    call retry%pack_to_fea(retry_hsv)
+    call check_approx(passed, "Same committed history", retry_hsv, clean_hsv, tol=TOL_SAME_HISTORY)
+end subroutine test_closest_point_vonmises_rollback_retry
