@@ -255,7 +255,10 @@ subroutine test_CPB06_stresseq_derivates2_6(passed)
     use muscle_test_utils
     implicit none
     
-    real(real64), parameter :: EPS=1e-10
+    ! Hessian against central second differences of the base class (step h = 1e-4 ||sigma||,
+    ! h/2 on the shears): the rounding error eps*f/h**2 is ~2e-8 and the truncation O(h**2)
+    ! ~1e-8. Measured: 3.5e-8 or less
+    real(real64), parameter :: TOL = 1.0e-7_real64
     logical, intent(out) :: passed
 
     type(CPB06) :: cpb
@@ -274,49 +277,49 @@ subroutine test_CPB06_stresseq_derivates2_6(passed)
     call to_test%init((/1D0, 0D0, 0D0, 0D0, 0D0, 0D0/))
     result1 = cpb%ddstressEq_ddstress(to_test)
     result2 = cpb%ddstressEq_ddstress_numeric(to_test)
-    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (1,0,0,0,0,0)", result1, result2)
+    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (1,0,0,0,0,0)", result1, result2, tol=TOL)
     if (.not. passed) return
 
     call to_test%init((/0D0, 1D0, 0D0, 0D0, 0D0, 0D0/))
     result1 = cpb%ddstressEq_ddstress(to_test)
     result2 = cpb%ddstressEq_ddstress_numeric(to_test)
-    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (0,1,0,0,0,0)", result1, result2)
+    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (0,1,0,0,0,0)", result1, result2, tol=TOL)
     if (.not. passed) return
 
     call to_test%init((/0D0, 0D0, 1D0, 0D0, 0D0, 0D0/))
     result1 = cpb%ddstressEq_ddstress(to_test)
     result2 = cpb%ddstressEq_ddstress_numeric(to_test)
-    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (0,0,1,0,0,0)", result1, result2)
+    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (0,0,1,0,0,0)", result1, result2, tol=TOL)
     if (.not. passed) return
 
     call to_test%init((/0D0, 0D0, 0D0, 1D0, 0D0, 0D0/))
     result1 = cpb%ddstressEq_ddstress(to_test)
     result2 = cpb%ddstressEq_ddstress_numeric(to_test)
-    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (0,0,0,1,0,0)", result1, result2)
+    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (0,0,0,1,0,0)", result1, result2, tol=TOL)
     if (.not. passed) return
 
     call to_test%init((/0D0, 0D0, 0D0, 0D0, 1D0, 0D0/))
     result1 = cpb%ddstressEq_ddstress(to_test)
     result2 = cpb%ddstressEq_ddstress_numeric(to_test)
-    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (0,0,0,0,1,0)", result1, result2)
+    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (0,0,0,0,1,0)", result1, result2, tol=TOL)
     if (.not. passed) return
 
     call to_test%init((/0D0, 0D0, 0D0, 0D0, 0D0, 1D0/))
     result1 = cpb%ddstressEq_ddstress(to_test)
     result2 = cpb%ddstressEq_ddstress_numeric(to_test)
-    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (0,0,0,0,0,1)", result1, result2)
+    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (0,0,0,0,0,1)", result1, result2, tol=TOL)
     if (.not. passed) return
 
     call to_test%init((/1D0, 1D0, 0D0, 0D0, 0D0, 0D0/))
     result1 = cpb%ddstressEq_ddstress(to_test)
     result2 = cpb%ddstressEq_ddstress_numeric(to_test)
-    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (1,1,0,0,0,0)", result1, result2)
+    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (1,1,0,0,0,0)", result1, result2, tol=TOL)
     if (.not. passed) return
 
     call to_test%init((/1D0, 1D0, 0D0, 0D0, 0D0, 0D0/))
     result1 = cpb%ddstressEq_ddstress(to_test)
     result2 = cpb%ddstressEq_ddstress_numeric(to_test)
-    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (1,1,0,0,0,0)", result1, result2)
+    call check_approx(passed, "ddstressEq_ddstress vs numeric, stress = (1,1,0,0,0,0)", result1, result2, tol=TOL)
     if (.not. passed) return
 
 end subroutine
@@ -494,74 +497,79 @@ end subroutine test_CPB06_gradient_analytical_8
 
 subroutine test_CPB06_hessian_numeric_9(passed)
     ! Hessian against the finite-difference Hessian of the base class, in a state with normal
-    ! and shear components together (it fills the normal-shear entries). Measured differences:
-    ! 3e-8 to 1.5e-7
+    ! and shear components together (it fills the normal-shear entries)
+    ! Called by program test_muscle_yield_cpb06 (STOP 9)
     use, intrinsic :: iso_fortran_env
     use muscle_tensors
     use muscle_yield_cpb06
+    use muscle_test_utils
     implicit none
     logical, intent(out) :: passed
 
+    ! Central second differences of the base class (step h = 1e-4 ||sigma||): rounding of
+    ! eps*f/h**2 ~2e-8 relative, and a truncation O(h**2) that grows with a.
+    ! Measured: 1.5e-7 or less (a = 8)
     real(real64), parameter :: TOL = 1.0e-6_real64
     type(CPB06) :: cpb(6)
     type(ten_3D2Osym) :: to_test
     type(ten_3D4O3sym) :: result1, result2
 
+    passed = .true.
     call CPB06_test_materials(cpb)
     call to_test%init((/180D0, -40D0, 25D0, 60D0, -30D0, 45D0/))
 
     ! Ti-6Al-4V
     result1 = cpb(2)%ddstressEq_ddstress(to_test)
     result2 = cpb(2)%ddstressEq_ddstress_numeric(to_test)
-    passed = result1%is_approx(result2, tol=TOL)
-    if (.not. passed) print*, "CPB06 Hessian vs numeric failed: Ti-6Al-4V"
+    call check_approx(passed, "CPB06 Hessian vs numeric: Ti-6Al-4V", result1, result2, tol=TOL)
     if (.not. passed) return
 
     ! Non-symmetric C1 and different shear coefficients
     result1 = cpb(3)%ddstressEq_ddstress(to_test)
     result2 = cpb(3)%ddstressEq_ddstress_numeric(to_test)
-    passed = result1%is_approx(result2, tol=TOL)
-    if (.not. passed) print*, "CPB06 Hessian vs numeric failed: non-symmetric C1"
+    call check_approx(passed, "CPB06 Hessian vs numeric: non-symmetric C1", result1, result2, tol=TOL)
     if (.not. passed) return
 
     ! a = 8
     result1 = cpb(4)%ddstressEq_ddstress(to_test)
     result2 = cpb(4)%ddstressEq_ddstress_numeric(to_test)
-    passed = result1%is_approx(result2, tol=TOL)
-    if (.not. passed) print*, "CPB06 Hessian vs numeric failed: a = 8"
+    call check_approx(passed, "CPB06 Hessian vs numeric: a = 8", result1, result2, tol=TOL)
     if (.not. passed) return
 
     ! k = 1: the positive principal value has psi = 0, so its curvature is zero
     result1 = cpb(5)%ddstressEq_ddstress(to_test)
     result2 = cpb(5)%ddstressEq_ddstress_numeric(to_test)
-    passed = result1%is_approx(result2, tol=TOL)
-    if (.not. passed) print*, "CPB06 Hessian vs numeric failed: k = 1"
+    call check_approx(passed, "CPB06 Hessian vs numeric: k = 1", result1, result2, tol=TOL)
     if (.not. passed) return
 
     ! k = -1: the negative principal values have psi = 0, so their curvature is zero
     result1 = cpb(6)%ddstressEq_ddstress(to_test)
     result2 = cpb(6)%ddstressEq_ddstress_numeric(to_test)
-    passed = result1%is_approx(result2, tol=TOL)
-    if (.not. passed) print*, "CPB06 Hessian vs numeric failed: k = -1"
+    call check_approx(passed, "CPB06 Hessian vs numeric: k = -1", result1, result2, tol=TOL)
     if (.not. passed) return
 end subroutine test_CPB06_hessian_numeric_9
 
 subroutine test_CPB06_hessian_analytical_10(passed)
     ! Hessian against analytical values: von Mises in the isotropic limit and a high-precision
     ! reference
+    ! Called by program test_muscle_yield_cpb06 (STOP 10)
     use, intrinsic :: iso_fortran_env
     use muscle_tensors
     use muscle_yield_cpb06
     use muscle_yield_vonmises
+    use muscle_test_utils
     implicit none
     logical, intent(out) :: passed
 
+    ! Exact references: round-off only. Measured: 5.2e-16; the relative tolerance 1e-12
+    ! (~5000 eps) leaves margin
     real(real64), parameter :: TOL = 1.0e-12_real64
     type(CPB06) :: cpb(6)
     type(VonMises) :: vm
     type(ten_3D2Osym) :: to_test
     type(ten_3D4O3sym) :: result1, result2
 
+    passed = .true.
     call CPB06_test_materials(cpb)
 
     ! Isotropic limit, uniaxial tension along x: two equal principal values, where the
@@ -569,16 +577,14 @@ subroutine test_CPB06_hessian_analytical_10(passed)
     call to_test%init((/300D0, 0D0, 0D0, 0D0, 0D0, 0D0/))
     result1 = cpb(1)%ddstressEq_ddstress(to_test)
     result2 = vm%ddstressEq_ddstress(to_test)
-    passed = result1%is_approx(result2, tol=TOL)
-    if (.not. passed) print*, "CPB06 isotropic Hessian vs von Mises failed: uniaxial"
+    call check_approx(passed, "CPB06 isotropic Hessian vs von Mises: uniaxial", result1, result2, tol=TOL)
     if (.not. passed) return
 
     ! Isotropic limit, general state (normal and shear components together)
     call to_test%init((/180D0, -40D0, 25D0, 60D0, -30D0, 45D0/))
     result1 = cpb(1)%ddstressEq_ddstress(to_test)
     result2 = vm%ddstressEq_ddstress(to_test)
-    passed = result1%is_approx(result2, tol=TOL)
-    if (.not. passed) print*, "CPB06 isotropic Hessian vs von Mises failed: general state"
+    call check_approx(passed, "CPB06 isotropic Hessian vs von Mises: general state", result1, result2, tol=TOL)
     if (.not. passed) return
 
     ! Ti-6Al-4V, general state: reference computed with 60-digit arithmetic (mpmath) from an
@@ -595,8 +601,7 @@ subroutine test_CPB06_hessian_analytical_10(passed)
                       yyyz=-2.3196787439809610D-4, zzxz=2.9753317956722756D-5, &
                       xxyz=3.4383310062787841D-4, yyxz=7.3900025148785610D-4, &
                       xxxz=-7.6875356944457885D-4)
-    passed = result1%is_approx(result2, tol=TOL)
-    if (.not. passed) print*, "CPB06 Hessian vs reference failed: Ti-6Al-4V, general state"
+    call check_approx(passed, "CPB06 Hessian vs reference: Ti-6Al-4V, general state", result1, result2, tol=TOL)
     if (.not. passed) return
 
     ! Ti-6Al-4V, pure shear xy: Sigma has a zero principal value, where (|lam| - k lam)**2
@@ -610,7 +615,6 @@ subroutine test_CPB06_hessian_analytical_10(passed)
                         -1.3636469682588755D-03, -1.1509818340253298D-03, 0.0D0, 0.0D0, &
                         5.7574999645274949D-04, -1.3646880150501440D-03, 0.0D0, 0.0D0, &
                         0.0D0, 0.0D0, 0.0D0, 0.0D0, 0.0D0, 0.0D0, 0.0D0/))
-    passed = result1%is_approx(result2, tol=TOL)
-    if (.not. passed) print*, "CPB06 Hessian vs reference failed: Ti-6Al-4V, pure shear"
+    call check_approx(passed, "CPB06 Hessian vs reference: Ti-6Al-4V, pure shear", result1, result2, tol=TOL)
     if (.not. passed) return
 end subroutine test_CPB06_hessian_analytical_10
