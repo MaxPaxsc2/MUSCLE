@@ -45,8 +45,12 @@ program test_muscle_kinematics
     call test_tangent_modulus_transformations(passed)
     if (.not. passed) stop 8
 
+    print*, "9. Inverse quantities of finite-strain kinematics (F^-1, b^-1)..."
+    call test_finite_inverse_quantities(passed)
+    if (.not. passed) stop 9
+
     print*, "========================================================"
-    print*, "  ALL 8 KINEMATICS TESTS PASSED SUCCESSFULLY!          "
+    print*, "  ALL 9 KINEMATICS TESTS PASSED SUCCESSFULLY!          "
     print*, "========================================================"
     stop 0
 end program test_muscle_kinematics
@@ -368,3 +372,98 @@ subroutine test_tangent_modulus_transformations(passed)
 
     passed = .TRUE.
 end subroutine test_tangent_modulus_transformations
+
+
+! =========================================================================
+! 9. Inverse quantities of finite-strain kinematics
+! =========================================================================
+subroutine test_finite_inverse_quantities(passed)
+    !! F^-1 and b^-1 = F^-T F^-1 computed by `update_F` (through the tensor inverse, M33INV):
+    !!
+    !! 1. General F with an exactly known inverse: F = L U with unit lower/upper triangular factors
+    !!    (L21 = 1/2, L31 = -1/4, L32 = 3/4, U12 = 1/4, U13 = 1/2, U23 = -1/2), so det F = 1 and
+    !!    F^-1 = U^-1 L^-1 (closed form). All entries are short dyadic fractions, so F^-1 and b^-1
+    !!    are exact in binary: compared exactly (tol = 0).
+    !! 2. Ill-conditioned F = Q diag(1e5, 1, 1e-5) Q^T (Q: rotation of 0.7 rad about (1,2,2)/3),
+    !!    cond ~ 1e10. Reference: inverse of the same double-precision F in quad precision. A
+    !!    backward-stable inverse has a relative error O(kappa eps), so tol = 10 kappa_inf eps.
+    !!    The former hand-written adjugate in update_F had no LU fallback and missed this bound
+    !!    (error ~1e-4 relative at cond 1e10).
+    use, intrinsic :: iso_fortran_env, only : real64, real128
+    use muscle_tensors
+    use muscle_kinematics
+    use muscle_test_utils
+    implicit none
+    logical, intent(out) :: passed
+    type(Total_lagrangian_kinematics) :: kin
+    type(ten_3D2O) :: F, F_inv_exact
+    type(ten_3D2Osym) :: b_inv_exact
+    real(real64) :: L(3,3), U(3,3), L_inv(3,3), U_inv(3,3), g(3,3), q(3,3), n(3), d(3, 3), f3(3,3)
+    real(real64) :: ct, st, kappa, x(3,3)
+    real(real128) :: xr(3,3)
+    real(real64), parameter :: THETA = 0.7D0
+
+    passed = .true.
+
+    ! --- 1. General F with an exact inverse ---
+    L     = reshape((/ 1D0, 0.5D0, -0.25D0,   0D0, 1D0, 0.75D0,   0D0, 0D0, 1D0 /), (/3,3/))
+    U     = reshape((/ 1D0, 0D0, 0D0,   0.25D0, 1D0, 0D0,   0.5D0, -0.5D0, 1D0 /), (/3,3/))
+    L_inv = reshape((/ 1D0, -0.5D0, 0.5D0*0.75D0 + 0.25D0,   0D0, 1D0, -0.75D0,   0D0, 0D0, 1D0 /), (/3,3/))
+    U_inv = reshape((/ 1D0, 0D0, 0D0,   -0.25D0, 1D0, 0D0,   0.25D0*(-0.5D0) - 0.5D0, 0.5D0, 1D0 /), (/3,3/))
+    g = matmul(U_inv, L_inv)
+    call F%init(reshape(matmul(L, U), (/9/)))
+    call F_inv_exact%init(reshape(g, (/9/)))
+    x = matmul(transpose(g), g)                                   ! b^-1 = F^-T F^-1
+    call b_inv_exact%init(xx=x(1,1), yy=x(2,2), zz=x(3,3), xy=x(1,2), yz=x(2,3), xz=x(1,3))
+
+    call kin%update_F(F)
+    call check_approx(passed, "update_F: F^-1 (F = L U, exact)", kin%F_inv, F_inv_exact, tol=0D0)
+    call check_approx(passed, "update_F: b^-1 = F^-T F^-1 (exact)", kin%b_inv, b_inv_exact, tol=0D0)
+    call check_approx(passed, "update_F: J = det F = 1", kin%J, 1D0, tol=0D0)
+
+    ! --- 2. Ill-conditioned F ---
+    n = (/1D0, 2D0, 2D0/) / 3D0
+    ct = cos(THETA); st = sin(THETA)
+    q(1,:) = (/ ct + n(1)**2*(1-ct),        n(1)*n(2)*(1-ct) - n(3)*st, n(1)*n(3)*(1-ct) + n(2)*st /)
+    q(2,:) = (/ n(2)*n(1)*(1-ct) + n(3)*st, ct + n(2)**2*(1-ct),        n(2)*n(3)*(1-ct) - n(1)*st /)
+    q(3,:) = (/ n(3)*n(1)*(1-ct) - n(2)*st, n(3)*n(2)*(1-ct) + n(1)*st, ct + n(3)**2*(1-ct)        /)
+    d = 0D0
+    d(1,1) = 1D5; d(2,2) = 1D0; d(3,3) = 1D-5
+    f3 = matmul(q, matmul(d, transpose(q)))
+    call F%init(reshape(f3, (/9/)))
+    call quad_inverse_3(f3, xr)
+    x = real(xr, real64)
+    call F_inv_exact%init(reshape(x, (/9/)))
+    kappa = maxval(sum(abs(f3), dim=2)) * maxval(sum(abs(x), dim=2))
+
+    call kin%update_F(F)
+    call check_approx(passed, "update_F: F^-1 of an ill-conditioned F (cond ~1e10)", kin%F_inv, &
+                      F_inv_exact, tol=10D0*kappa*epsilon(1D0))
+
+contains
+
+    subroutine quad_inverse_3(a, ainv)
+        !! Gauss-Jordan with partial pivoting in quad precision (reference inverse).
+        real(real64), intent(in) :: a(3,3)
+            !! Matrix (double precision).
+        real(real128), intent(out) :: ainv(3,3)
+            !! Its inverse, computed in quad precision.
+        real(real128) :: w(3,6), tmp(6), fac
+        integer :: ii, kk, p
+        w = 0; w(:,1:3) = real(a, real128)
+        do ii = 1, 3
+            w(ii,3+ii) = 1
+        end do
+        do kk = 1, 3
+            p = kk - 1 + maxloc(abs(w(kk:3,kk)), 1)
+            tmp = w(kk,:); w(kk,:) = w(p,:); w(p,:) = tmp
+            w(kk,:) = w(kk,:) / w(kk,kk)
+            do ii = 1, 3
+                if (ii /= kk) then
+                    fac = w(ii,kk); w(ii,:) = w(ii,:) - fac*w(kk,:)
+                end if
+            end do
+        end do
+        ainv = w(:,4:6)
+    end subroutine quad_inverse_3
+end subroutine test_finite_inverse_quantities

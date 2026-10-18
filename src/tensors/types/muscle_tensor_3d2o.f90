@@ -139,6 +139,8 @@ module muscle_tensor_3d2o
             !! Compares two tensors for approximate equality.
         procedure, public :: det => det_3D2O
         procedure, public :: transpose => transpose_3D2O
+        procedure, public :: inv => inv_3D2O
+            !! Inverse tensor (quiet NaN if singular).
     end type ten_3D2O
 
     public :: operator(.approx.)
@@ -194,6 +196,17 @@ module muscle_tensor_3d2o
     interface transpose
         module procedure transpose_3D2O
     end interface
+    public :: operator(.inv.)
+    interface operator (.inv.)
+        module procedure inv_3D2O
+    end interface
+
+    public :: inverse
+    interface inverse
+        !! `call inverse(a, a_inv, ok [, cond])`: inverse with a success flag and condition number.
+        module procedure inverse_3D2O
+    end interface
+
 contains
 
     pure subroutine ten_3D2O_real64_assign(a, b)
@@ -455,5 +468,49 @@ contains
         
     ! !     res%vals( 6) = a%vals(6)*b%vals(6)
     ! ! end procedure tdot_3D2Osym_3D2Osym
+
+    pure subroutine inverse_3D2O(a, a_inv, ok, cond)
+        !! Inverse of a `ten_3D2O` with a success flag (generic `inverse`, also used by `.inv.` and
+        !! `%inv()`).
+        !!
+        !! The 3x3 matrix (column-major storage) is inverted with `M33INV` (adjugate +
+        !! \( \kappa_\infty \), LU fallback).
+        !!
+        !! If the matrix is singular (or contains NaN): `ok = .false.`, `a_inv` is filled with quiet
+        !! NaN and `cond = huge(1.0D0)`.
+        use muscle_math_inverses, only : M33INV, QUIET_NAN
+        implicit none
+        class(ten_3D2O), intent(in) :: a
+            !! Tensor to invert.
+        type(ten_3D2O), intent(out) :: a_inv
+            !! Inverse tensor (quiet NaN if `a` is singular).
+        logical, intent(out) :: ok
+            !! `.true.` if the inversion succeeded, `.false.` if `a` is singular.
+        real(real64), intent(out), optional :: cond
+            !! Condition number \( \kappa_\infty \) of the 3x3 matrix that is inverted (from `M33INV`); `huge(1.0D0)` if singular.
+        real(real64) :: m(3,3), x(3,3), kap
+
+        m(:,1) = a%vals(1:3); m(:,2) = a%vals(4:6); m(:,3) = a%vals(7:9)
+        call M33INV(m, x, ok, kap)
+        if (.not. ok) then
+            a_inv%vals = QUIET_NAN()
+            if (present(cond)) cond = huge(1.0D0)
+            return
+        end if
+        a_inv%vals(1:3) = x(:,1); a_inv%vals(4:6) = x(:,2); a_inv%vals(7:9) = x(:,3)
+        if (present(cond)) cond = kap
+    end subroutine inverse_3D2O
+
+    pure function inv_3D2O(self) result(res)
+        !! `.inv.` and `%inv()`: inverse of a `ten_3D2O`; quiet NaN if it is singular (use the
+        !! generic `inverse` to get a success flag and the condition number).
+        implicit none
+        class(ten_3D2O), intent(in) :: self
+            !! Tensor to invert.
+        type(ten_3D2O) :: res
+            !! Inverse tensor.
+        logical :: ok
+        call inverse_3D2O(self, res, ok)
+    end function inv_3D2O
 
 end module muscle_tensor_3d2o
