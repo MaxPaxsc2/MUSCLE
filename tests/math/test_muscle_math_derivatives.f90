@@ -206,6 +206,9 @@ program test_muscle_math_derivatives
     call test_derivate2O_normal_shear(passed)
     if (.not. passed) STOP 6
 
+    call test_dsquare_general(passed)
+    if (.not. passed) STOP 7
+
     STOP 0
 end program test_muscle_math_derivatives
 
@@ -588,4 +591,35 @@ subroutine test_derivate2O_normal_shear(passed)
                               result%vals(:), new_line('A'), &
                               "The expected are:", new_line('A'), &
                               expected%vals(:), new_line('A')
+end subroutine
+
+
+subroutine test_dsquare_general(passed)
+    ! Analytical derivative of the square, dsquare(A). The square is quadratic, so
+    ! (A + B)^2 - A^2 - B^2 = AB + BA = dsquare(A) : B exactly. General A and B: all normal and
+    ! shear components nonzero and different, so each of the 21 components of dsquare(A) reaches
+    ! the result
+    ! Called by program test_muscle_math_derivatives (STOP 7)
+    use, intrinsic :: iso_fortran_env
+    use muscle_math_derivatives
+    use muscle_tensors
+    use muscle_test_utils
+    implicit none
+
+    logical, intent(out) :: passed
+
+    type(ten_3D2Osym) :: a, b, a_plus_b, expected, result
+    ! Both sides are exact up to round-off in the products and the differences of squares.
+    ! Measured: 3.0e-16
+    real(real64), parameter :: TOL = 1.0D-12
+
+    passed = .true.
+    call a%init(xx=3.0D0, yy=-1.5D0, zz=0.7D0, xy=2.2D0, yz=-0.9D0, xz=1.3D0)
+    call b%init(xx=-0.4D0, yy=1.1D0, zz=2.5D0, xy=-1.7D0, yz=0.6D0, xz=0.8D0)
+    a_plus_b = a + b
+    expected = a_plus_b%square() - a%square() - b%square()
+    result = dsquare(a) .ddot. b
+
+    call check_approx(passed, "dsquare(A) : B = (A + B)^2 - A^2 - B^2, general A and B", &
+                      result, expected, tol=TOL)
 end subroutine
