@@ -26,6 +26,12 @@ program test_muscle_yield_dp
     call test_dp_biaxial_comp_abaqus(passed)
     if (.not. passed) stop 7
 
+    call test_DruckerPrager_hessian_vs_numeric(passed)
+    if (.not. passed) stop 8
+
+    call test_DruckerPrager_hessian_analytical(passed)
+    if (.not. passed) stop 9
+
     stop 0
 end program test_muscle_yield_dp
 
@@ -612,3 +618,86 @@ subroutine test_dp_biaxial_comp_abaqus(passed)
     end if
 
 end subroutine test_dp_biaxial_comp_abaqus
+
+subroutine test_DruckerPrager_hessian_vs_numeric(passed)
+    ! Hessian against the finite-difference Hessian of the base class, with K < 1 (third-invariant
+    ! term active) in the three calibrations, in states with normal and shear components together
+    ! Called by program test_muscle_yield_dp (STOP 8)
+    use, intrinsic :: iso_fortran_env, only : real64
+    use muscle_tensors
+    use muscle_yield_druckerprager
+    use muscle_test_utils
+    implicit none
+    logical, intent(out) :: passed
+
+    ! Central second differences of the base class: truncation and rounding, largest with the
+    ! large hydrostatic part. Measured: 5.5e-7 or less (compression case; 1.1e-7 the others)
+    real(real64), parameter :: TOL = 1.0D-6
+    type(DruckerPrager) :: dp
+    type(ten_3D2Osym) :: stress
+    type(ten_3D4O3sym) :: hess, hess_num
+
+    passed = .true.
+
+    ! K = 0.78 (lower bound) makes the third-invariant term largest; tension-like Lode angle
+    ! (r^3 > 0)
+    call dp%init(beta_deg=16.0D0, K=0.78D0, hardening_mode=DP_HARDENING_TENSION)
+    call stress%init(xx=300.0D0, yy=40.0D0, zz=-20.0D0, xy=45.0D0, yz=-30.0D0, xz=55.0D0)
+    hess = dp%ddstressEq_ddstress(stress)
+    hess_num = dp%ddstressEq_ddstress_numeric(stress)
+    call check_approx(passed, "DP Hessian vs numeric: tension calibration, K = 0.78", &
+                      hess, hess_num, tol=TOL)
+
+    ! Compression-like Lode angle (r^3 < 0) on top of a large hydrostatic part, as in the
+    ! biaxial case, with shears added
+    call dp%init(beta_deg=16.0D0, K=0.85D0, hardening_mode=DP_HARDENING_COMPRESSION)
+    call stress%init(xx=-1048.47D0, yy=-1647.97D0, zz=-970.69D0, xy=-120.0D0, yz=85.0D0, xz=40.0D0)
+    hess = dp%ddstressEq_ddstress(stress)
+    hess_num = dp%ddstressEq_ddstress_numeric(stress)
+    call check_approx(passed, "DP Hessian vs numeric: compression calibration, K = 0.85", &
+                      hess, hess_num, tol=TOL)
+
+    ! Shear calibration with K < 1: the third-invariant term that the K = 1 check of STOP 9 misses
+    call dp%init(beta_deg=16.0D0, K=0.78D0, hardening_mode=DP_HARDENING_SHEAR)
+    call stress%init(xx=300.0D0, yy=40.0D0, zz=-20.0D0, xy=45.0D0, yz=-30.0D0, xz=55.0D0)
+    hess = dp%ddstressEq_ddstress(stress)
+    hess_num = dp%ddstressEq_ddstress_numeric(stress)
+    call check_approx(passed, "DP Hessian vs numeric: shear calibration, K = 0.78", &
+                      hess, hess_num, tol=TOL)
+end subroutine test_DruckerPrager_hessian_vs_numeric
+
+subroutine test_DruckerPrager_hessian_analytical(passed)
+    ! Hessian against analytical values: the Von Mises Hessian for K = 1, and zero on the
+    ! hydrostatic axis
+    ! Called by program test_muscle_yield_dp (STOP 9)
+    use, intrinsic :: iso_fortran_env, only : real64
+    use muscle_tensors
+    use muscle_yield_druckerprager
+    use muscle_yield_vonmises
+    use muscle_test_utils
+    implicit none
+    logical, intent(out) :: passed
+
+    ! Exact reference: round-off only. Measured: identical to Von Mises (difference 0)
+    real(real64), parameter :: TOL = 1.0D-12
+    type(DruckerPrager) :: dp
+    type(VonMises) :: vm
+    type(ten_3D2Osym) :: stress
+    type(ten_3D4O3sym) :: hess
+
+    passed = .true.
+
+    ! K = 1 removes the third-invariant term and the shear calibration gives f = 1, so the
+    ! Hessian must equal the Von Mises one; normal and shear components together
+    call dp%init(beta_deg=16.0D0, K=1.0D0, hardening_mode=DP_HARDENING_SHEAR)
+    call stress%init(xx=210.0D0, yy=-45.0D0, zz=80.0D0, xy=60.0D0, yz=-35.0D0, xz=25.0D0)
+    call check_approx(passed, "DP Hessian vs Von Mises: K = 1, shear calibration", &
+                      dp%ddstressEq_ddstress(stress), vm%ddstressEq_ddstress(stress), tol=TOL)
+
+    ! Pure hydrostatic stress (q = 0): the gradient is constant there, so the Hessian is
+    ! exactly zero and must not be NaN (the return mapping reaches this state in tension)
+    call stress%init(xx=500.0D0, yy=500.0D0, zz=500.0D0, xy=0.0D0, yz=0.0D0, xz=0.0D0)
+    hess = dp%ddstressEq_ddstress(stress)
+    call check_true(passed, "DP Hessian is exactly zero on the hydrostatic axis", &
+                    all(abs(hess%vals) < tiny(1.0D0)))
+end subroutine test_DruckerPrager_hessian_analytical
