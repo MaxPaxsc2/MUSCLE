@@ -1,4 +1,5 @@
 add_muscle_test(closest_point test_muscle_solver_closest_point.f90)
+add_muscle_test(closest_point_yld2004 test_muscle_solver_closest_point_yld2004.f90)
 add_muscle_test(closest_point_time test_muscle_solver_closest_point_time.f90)
 add_muscle_test(closest_point_2 test_muscle_solver_closest_point_2.f90)
 add_muscle_test(cutting_plane test_muscle_solver_cutting_plane.f90)
