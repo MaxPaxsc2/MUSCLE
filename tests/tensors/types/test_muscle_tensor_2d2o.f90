@@ -22,14 +22,11 @@ program test_muscle_tensor_2d2o
     call test_det_transpose(passed)
     if (.not. passed) STOP 4
 
-    call test_products(passed)
+    call test_identity_ops(passed)
     if (.not. passed) STOP 5
 
-    call test_identity_ops(passed)
-    if (.not. passed) STOP 6
-
     call test_mixed_sym(passed)
-    if (.not. passed) STOP 7
+    if (.not. passed) STOP 6
 
     print *, "Passed!"
     STOP 0
@@ -119,28 +116,8 @@ subroutine test_det_transpose(passed)
 end subroutine test_det_transpose
 
 
-subroutine test_products(passed)
-    !! Single contraction: [[1,2],[3,4]].[[0,1],[1,0]] = [[2,1],[4,3]], zz: 5*2 = 10;
-    !! det(A.B) = det(A) det(B).
-    use, intrinsic :: iso_fortran_env
-    use muscle_tensors
-    use muscle_test_utils
-    implicit none
-    logical, intent(out) :: passed
-    type(ten_2D2O) :: a, b, ab, expected
-
-    passed = .true.
-    call a%init(xx=1D0, xy=2D0, yx=3D0, yy=4D0, zz=5D0)
-    call b%init(xx=0D0, xy=1D0, yx=1D0, yy=0D0, zz=2D0)
-    call expected%init(xx=2D0, xy=1D0, yx=4D0, yy=3D0, zz=10D0)
-    ab = a * b
-    call check_approx(passed, "a * b", ab, expected)
-    call check_approx(passed, "det(a*b) = det(a) det(b)", ab%det(), a%det()*b%det(), tol=1D-12)
-end subroutine test_products
-
-
 subroutine test_identity_ops(passed)
-    !! I and cI with a general 2D tensor: +, -, *, :.
+    !! I and cI with a general 2D tensor: +, -.
     use, intrinsic :: iso_fortran_env
     use muscle_tensors
     use muscle_test_utils
@@ -167,10 +144,6 @@ subroutine test_identity_ops(passed)
     call expected%init(xx=-1D0, xy=2D0, yx=3D0, yy=2D0, zz=3D0)
     call check_approx(passed, "a - 2I", a - I2S, expected)
     call check_approx(passed, "2I - a", I2S - a, -expected)
-    call check_approx(passed, "I * a", I2 * a, a)
-    call check_approx(passed, "a * I", a * I2, a)
-    call check_approx(passed, "2I * a", I2S * a, 2D0*a)
-    call check_approx(passed, "a * 2I", a * I2S, 2D0*a)
     call check_approx(passed, "I .ddot. a", I2 .ddot. a, 10D0, tol=TOL)
     call check_approx(passed, "a .ddot. I", a .ddot. I2, 10D0, tol=TOL)
     call check_approx(passed, "2I .ddot. a", I2S .ddot. a, 20D0, tol=TOL)

@@ -50,6 +50,8 @@ module muscle_tensor_ops_contraction_single
         module procedure mul_I2O_3D2Osym
         module procedure mul_I2OS_3D2O
         module procedure mul_3D2O_I2OS
+        module procedure mul_I2OS_3D2Osym
+        module procedure mul_3D2Osym_I2OS
         module procedure mul_2D2O_I2O
         module procedure mul_I2O_2D2O
         module procedure mul_I2OS_2D2O
@@ -223,8 +225,11 @@ contains
         !! Computes the single contraction \(\mathbf{res} = \mathbf{I} \cdot \mathbf{A} = \mathbf{A}\).
         implicit none
         type(iden_2O), intent(in) :: I2
+            !! The standard 2nd-order identity tensor \(\mathbf{I}\).
         type(ten_3D2O), intent(in) :: a
+            !! The general 3D tensor \(\mathbf{A}\).
         type(ten_3D2O) :: res
+            !! The resulting tensor.
         res%vals = a%vals
     end function mul_I2O_3D2O
 
@@ -232,8 +237,11 @@ contains
         !! Computes the single contraction \(\mathbf{res} = \mathbf{A} \cdot \mathbf{I} = \mathbf{A}\).
         implicit none
         type(iden_2O), intent(in) :: I2
+            !! The standard 2nd-order identity tensor \(\mathbf{I}\).
         type(ten_3D2O), intent(in) :: a
+            !! The general 3D tensor \(\mathbf{A}\).
         type(ten_3D2O) :: res
+            !! The resulting tensor.
         res%vals = a%vals
     end function mul_3D2O_I2O
 
@@ -241,8 +249,11 @@ contains
         !! Computes the single contraction \(\mathbf{res} = \mathbf{I} \cdot \mathbf{A} = \mathbf{A}\).
         implicit none
         type(iden_2O), intent(in) :: I2
+            !! The standard 2nd-order identity tensor \(\mathbf{I}\).
         type(ten_3D2Osym), intent(in) :: a
+            !! The symmetric 3D tensor \(\mathbf{A}\).
         type(ten_3D2Osym) :: res
+            !! The resulting symmetric tensor.
         res%vals = a%vals
     end function mul_I2O_3D2Osym
 
@@ -250,8 +261,11 @@ contains
         !! Computes the single contraction \(\mathbf{res} = \mathbf{A} \cdot \mathbf{I} = \mathbf{A}\).
         implicit none
         type(iden_2O), intent(in) :: I2
+            !! The standard 2nd-order identity tensor \(\mathbf{I}\).
         type(ten_3D2Osym), intent(in) :: a
+            !! The symmetric 3D tensor \(\mathbf{A}\).
         type(ten_3D2Osym) :: res
+            !! The resulting symmetric tensor.
         res%vals = a%vals
     end function mul_3D2Osym_I2O
 
@@ -259,8 +273,11 @@ contains
         !! Computes the scaled contraction \(\mathbf{res} = c\mathbf{I} \cdot \mathbf{A} = c\mathbf{A}\).
         implicit none
         type(iden_2OS), intent(in) :: I2
+            !! The scaled identity \(c\mathbf{I}\).
         type(ten_3D2O), intent(in) :: a
+            !! The general 3D tensor \(\mathbf{A}\).
         type(ten_3D2O) :: res
+            !! The resulting tensor.
         res%vals = I2%val * a%vals
     end function mul_I2OS_3D2O
 
@@ -268,10 +285,37 @@ contains
         !! Computes the scaled contraction \(\mathbf{res} = \mathbf{A} \cdot c\mathbf{I} = c\mathbf{A}\).
         implicit none
         type(iden_2OS), intent(in) :: I2
+            !! The scaled identity \(c\mathbf{I}\).
         type(ten_3D2O), intent(in) :: a
+            !! The general 3D tensor \(\mathbf{A}\).
         type(ten_3D2O) :: res
+            !! The resulting tensor.
         res%vals = I2%val * a%vals
     end function mul_3D2O_I2OS
+
+    pure function mul_I2OS_3D2Osym(I2, a) result(res)
+        !! Computes the scaled contraction \(\mathbf{res} = c\mathbf{I} \cdot \mathbf{A} = c\mathbf{A}\).
+        implicit none
+        type(iden_2OS), intent(in) :: I2
+            !! The scaled identity \(c\mathbf{I}\).
+        type(ten_3D2Osym), intent(in) :: a
+            !! The symmetric 3D tensor \(\mathbf{A}\).
+        type(ten_3D2Osym) :: res
+            !! The resulting symmetric tensor.
+        res%vals = I2%val * a%vals
+    end function mul_I2OS_3D2Osym
+
+    pure function mul_3D2Osym_I2OS(a, I2) result(res)
+        !! Computes the scaled contraction \(\mathbf{res} = \mathbf{A} \cdot c\mathbf{I} = c\mathbf{A}\).
+        implicit none
+        type(ten_3D2Osym), intent(in) :: a
+            !! The symmetric 3D tensor \(\mathbf{A}\).
+        type(iden_2OS), intent(in) :: I2
+            !! The scaled identity \(c\mathbf{I}\).
+        type(ten_3D2Osym) :: res
+            !! The resulting symmetric tensor.
+        res%vals = I2%val * a%vals
+    end function mul_3D2Osym_I2OS
     ! =========================================================================
     ! 3. 2D TENSOR * 2D TENSOR (SINGLE CONTRACTION)
     ! =========================================================================

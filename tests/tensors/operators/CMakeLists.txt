@@ -1,4 +1,5 @@
 add_muscle_test(test_ddot_4O3_4O3 test_ddot_4O3_4O3.f90)
+add_muscle_test(test_operator_contraction_single test_operator_contraction_single.f90)
 add_muscle_test(test_operator_dyadic test_operator_dyadic.f90)
 add_muscle_test(test_operator_transform test_operator_transform.f90)
 

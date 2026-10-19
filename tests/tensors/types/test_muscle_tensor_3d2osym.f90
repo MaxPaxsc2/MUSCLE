@@ -28,14 +28,11 @@ program test_muscle_tensor_3d2osym
     call test_ten_3D2Osym_components(passed)
     if (.not. passed) STOP 8
 
-    call test_ten_3D2Osym_dot(passed)
+    call test_ten_3D2Osym_square(passed)
     if (.not. passed) STOP 9
 
-    call test_ten_3D2Osym_square(passed)
-    if (.not. passed) STOP 10
-
     call test_ten_3D2Osym_assign(passed)
-    if (.not. passed) STOP 11
+    if (.not. passed) STOP 10
 
     STOP 0
 end program test_muscle_tensor_3d2osym
@@ -518,124 +515,6 @@ subroutine test_ten_3D2Osym_components(passed)
     if (.not. passed) then
         print*, "6.- Error: Component xz() failed", new_line('A'), &
                 "Expected:", expected, " Actual:", result
-        return
-    end if
-
-end subroutine
-
-
-subroutine test_ten_3D2Osym_dot(passed)
-    use, intrinsic :: iso_fortran_env
-    use muscle_tensors
-    implicit none
-    logical, intent(out) :: passed
-
-    type(ten_3D2Osym) :: to_test1, to_test2
-    type(ten_3D2O) :: expected, result
-    
-    ! 1.- Product of zero tensors
-    call to_test1%init((/0D0, 0D0, 0D0, 0D0, 0D0, 0D0/))
-    call expected%init((/0D0, 0D0, 0D0, 0D0, 0D0, 0D0, 0D0, 0D0, 0D0/))
-    result = to_test1 * to_test1
-    passed = result .approx. expected
-    if (.not. passed) then
-        print*, "1.- Error: Product of zero tensors failed", new_line('A'), &
-                "Expected:", expected, new_line('A'), &
-                "Actual:", result
-        return
-    end if
-
-    ! 2.- Product of identity-like tensors (unit diagonal)
-    call to_test1%init((/1D0, 1D0, 1D0, 0D0, 0D0, 0D0/))
-    call expected%init((/1D0, 0D0, 0D0, 0D0, 1D0, 0D0, 0D0, 0D0, 1D0/))
-    result = to_test1 * to_test1
-    passed = result .approx. expected
-    if (.not. passed) then
-        print*, "2.- Error: Product of identity-like tensors failed", new_line('A'), &
-                "Expected:", expected, new_line('A'), &
-                "Actual:", result
-        return
-    end if
-
-    ! 3.- Product with scaled diagonal
-    call to_test1%init((/2D0, 2D0, 2D0, 0D0, 0D0, 0D0/))
-    call expected%init((/4D0, 0D0, 0D0, 0D0, 4D0, 0D0, 0D0, 0D0, 4D0/))
-    result = to_test1 * to_test1
-    passed = result .approx. expected
-    if (.not. passed) then
-        print*, "3.- Error: Product with scaled diagonal failed", new_line('A'), &
-                "Expected:", expected, new_line('A'), &
-                "Actual:", result
-        return
-    end if
-
-    ! 4.- Product of tensors filled with ones
-    call to_test1%init((/1D0, 1D0, 1D0, 1D0, 1D0, 1D0/))
-    call expected%init((/3D0, 3D0, 3D0, 3D0, 3D0, 3D0, 3D0, 3D0, 3D0/))
-    result = to_test1 * to_test1
-    passed = result .approx. expected
-    if (.not. passed) then
-        print*, "4.- Error: Product of tensors with ones failed", new_line('A'), &
-                "Expected:", expected, new_line('A'), &
-                "Actual:", result
-        return
-    end if
-
-    ! 5.- Self-product with general symmetric components
-    call to_test1%init((/1D0, 2D0, 3D0, 4D0, 5D0, 6D0/))
-    call expected%init((/53D0, 42D0, 44D0, 42D0, 45D0, 49D0, 44D0, 49D0, 70D0/))
-    result = to_test1 * to_test1
-    passed = result .approx. expected
-    if (.not. passed) then
-        print*, "5.- Error: Self-product with general components failed", new_line('A'), &
-                "Expected:", expected, new_line('A'), &
-                "Actual:", result
-        return
-    end if
-
-    ! 6.- Product with a zero tensor (neutral element test)
-    call to_test2%init((/0D0, 0D0, 0D0, 0D0, 0D0, 0D0/))
-    call expected%init((/0D0, 0D0, 0D0, 0D0, 0D0, 0D0, 0D0, 0D0, 0D0/))
-    result = to_test1 * to_test2
-    passed = result .approx. expected
-    if (.not. passed) then
-        print*, "6.- Error: Product with zero tensor failed (A * 0)", new_line('A'), &
-                "Expected:", expected, new_line('A'), &
-                "Actual:", result
-        return
-    end if
-
-    ! 7.- Commutativity with zero tensor (0 * A)
-    result = to_test2 * to_test1
-    passed = result .approx. expected
-    if (.not. passed) then
-        print*, "7.- Error: Product with zero tensor failed (0 * A)", new_line('A'), &
-                "Expected:", expected, new_line('A'), &
-                "Actual:", result
-        return
-    end if
-
-    ! 8.- General dot product (A * B)
-    call to_test1%init((/1D0, 2D0, 3D0, 4D0, 5D0, 6D0/))
-    call to_test2%init((/1D0, 1D0, 1D0, 1D0, 1D0, 1D0/))
-    call expected%init((/11D0, 11D0, 14D0, 11D0, 11D0, 14D0, 11D0, 11D0, 14D0/))
-    result = to_test1 * to_test2
-    passed = result .approx. expected
-    if (.not. passed) then
-        print*, "8.- Error: General dot product failed (A * B)", new_line('A'), &
-                "Expected:", expected, new_line('A'), &
-                "Actual:", result
-        return
-    end if
-
-    ! 9.- Non-commutativity test (B * A)
-    call expected%init((/11D0, 11D0, 11D0, 11D0, 11D0, 11D0, 14D0, 14D0, 14D0/))
-    result = to_test2 * to_test1
-    passed = result .approx. expected
-    if (.not. passed) then
-        print*, "9.- Error: General dot product failed (B * A)", new_line('A'), &
-                "Expected:", expected, new_line('A'), &
-                "Actual:", result
         return
     end if
 
