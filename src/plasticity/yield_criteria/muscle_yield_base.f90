@@ -128,6 +128,12 @@ module muscle_yield_base
         contains
             procedure(stress_eq_interface), deferred :: stress_eq
                 !! Computes the equivalent stress for a given stress tensor. Must be implemented by concrete types.
+            procedure :: stressEq_and_derivatives
+                !! Equivalent stress and its first and second derivatives at one stress. Default: the three
+                !! bindings in turn; a criterion overrides it when they share an expensive step.
+            procedure, nopass :: joint_evaluation
+                !! True when the criterion overrides `stressEq_and_derivatives` with a cheaper joint
+                !! evaluation; the return mapping then calls it instead of the three bindings. Default: false.
             procedure :: dstressEq_dstress => dstressEq_dstress_numeric
                 !! Computes d(stress_eq)/d(stress). Default uses numerical differentiation.
             procedure :: ddstressEq_ddstress => ddstressEq_ddstress_numeric
@@ -174,6 +180,31 @@ module muscle_yield_base
 
 
     contains
+        pure subroutine stressEq_and_derivatives(self, stress, f, df, ddf)
+            !! Equivalent stress and its first and second derivatives at the same stress, as the
+            !! return mapping needs them in each iteration. Default: stress_eq, dstressEq_dstress and
+            !! ddstressEq_ddstress in turn. Called by closest_point_iter when joint_evaluation() is true.
+            implicit none
+            class(Base_yield_critera), intent(in) :: self  !! The yield criterion object.
+            type(ten_3D2Osym), intent(in) :: stress       !! Input stress tensor (`ten_3D2Osym`).
+            real(real64), intent(out) :: f                 !! Equivalent stress.
+            type(ten_3D2Osym), intent(out) :: df           !! d(stress_eq)/d(stress).
+            type(ten_3D4O3sym), intent(out) :: ddf         !! d^2(stress_eq)/d(stress)^2.
+
+            f   = self%stress_eq(stress)
+            df  = self%dstressEq_dstress(stress)
+            ddf = self%ddstressEq_ddstress(stress)
+        end subroutine stressEq_and_derivatives
+
+        pure function joint_evaluation() result(res)
+            !! False: the criterion has no cheaper joint evaluation, so the return mapping calls
+            !! stress_eq, dstressEq_dstress and ddstressEq_ddstress one by one. Called by closest_point_iter.
+            implicit none
+            logical :: res  !! Whether to call stressEq_and_derivatives.
+
+            res = .false.
+        end function joint_evaluation
+
         pure function dstressEq_dstress_numeric(self, stress) result(res)
             !! Computes d(stress_eq)/d(stress) numerically using central finite differences.
             !! This is the default implementation bound to the `dstressEq_dstress` procedure.

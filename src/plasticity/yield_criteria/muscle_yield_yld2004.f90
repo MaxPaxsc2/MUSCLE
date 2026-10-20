@@ -38,6 +38,8 @@ module muscle_yield_yld2004
         procedure :: stress_eq
         procedure :: dstressEq_dstress => dstressEq_dstress_yld2004
         procedure :: ddstressEq_ddstress => ddstressEq_ddstress_yld2004
+        procedure :: stressEq_and_derivatives => stressEq_and_derivatives_yld2004
+        procedure, nopass :: joint_evaluation => joint_evaluation_yld2004
     end type Yld2004
 
 contains
@@ -78,19 +80,14 @@ contains
 
         lp = eigenvals(linear_transform(self%Lp, self%cp_shear, stress))     ! lam'
         lpp = eigenvals(linear_transform(self%Lpp, self%cpp_shear, stress))  ! lam''
-        res = (0.25D0*(abs(lp(1) - lpp(1))**self%a + abs(lp(1) - lpp(2))**self%a &
-                       + abs(lp(1) - lpp(3))**self%a                             &
-                       + abs(lp(2) - lpp(1))**self%a + abs(lp(2) - lpp(2))**self%a &
-                       + abs(lp(2) - lpp(3))**self%a                             &
-                       + abs(lp(3) - lpp(1))**self%a + abs(lp(3) - lpp(2))**self%a &
-                       + abs(lp(3) - lpp(3))**self%a))**(1D0/self%a)
+        res = equivalent_from_principal(self, lp, lpp)
     end function stress_eq
 
     pure function dstressEq_dstress_yld2004(self, stress) result(res)
         !! Analytical gradient df/dstress = L'^T : G' + L''^T : G'' (Barlat et al., 2005, Eqs. 11
         !! and 14), with G' = sum_i df/dlam'_i v'_i (x) v'_i from spectral_gradient, and the same
         !! for G''. Called by the return mapping through the dstressEq_dstress binding.
-        use muscle_math_spectral_derivs, only : spectral_decomposition, spectral_gradient
+        use muscle_math_spectral_derivs, only : spectral_decomposition
         implicit none
         class(Yld2004), intent(in) :: self
         type(ten_3D2Osym), intent(in) :: stress
@@ -101,8 +98,7 @@ contains
         call spectral_decomposition(linear_transform(self%Lp, self%cp_shear, stress), lp, Vp)
         call spectral_decomposition(linear_transform(self%Lpp, self%cpp_shear, stress), lpp, Vpp)
         call principal_derivatives(self, lp, lpp, dfp, dfpp)
-        res = pull_back(self%Lp, self%cp_shear, spectral_gradient(Vp, dfp)) &
-              + pull_back(self%Lpp, self%cpp_shear, spectral_gradient(Vpp, dfpp))
+        res = gradient_from_spectral(self, Vp, Vpp, dfp, dfpp)
     end function dstressEq_dstress_yld2004
 
     pure function ddstressEq_ddstress_yld2004(self, stress) result(res)
@@ -112,8 +108,7 @@ contains
         !! the other tensor fixed. The cross term M = sum_ij d2f/dlp_i dlpp_j Ep_i (x) Epp_j,
         !! with Ep_i = vp_i (x) vp_i, has no eigenvector-rotation part: Ep_i does not depend on Spp.
         !! Called by the return mapping through the ddstressEq_ddstress binding.
-        use muscle_math_spectral_derivs, only : spectral_decomposition, spectral_gradient, &
-                                                spectral_hessian
+        use muscle_math_spectral_derivs, only : spectral_decomposition
         implicit none
         class(Yld2004), intent(in) :: self
         type(ten_3D2Osym), intent(in) :: stress
@@ -121,11 +116,89 @@ contains
 
         real(real64) :: lp(3), lpp(3), Vp(3,3), Vpp(3,3), dfp(3), dfpp(3)
         real(real64) :: d2fp(3,3), d2fpp(3,3), d2fx(3,3)
-        type(ten_3D2Osym) :: a1, a2, a3, b1, b2, b3
 
         call spectral_decomposition(linear_transform(self%Lp, self%cp_shear, stress), lp, Vp)
         call spectral_decomposition(linear_transform(self%Lpp, self%cpp_shear, stress), lpp, Vpp)
         call principal_derivatives(self, lp, lpp, dfp, dfpp, d2fp, d2fpp, d2fx)
+        res = hessian_from_spectral(self, lp, lpp, Vp, Vpp, dfp, dfpp, d2fp, d2fpp, d2fx)
+    end function ddstressEq_ddstress_yld2004
+
+    pure subroutine stressEq_and_derivatives_yld2004(self, stress, f, df, ddf)
+        !! Equivalent stress, gradient and Hessian from one spectral decomposition of Sp and one of
+        !! Spp (Barlat et al., 2005, Eqs. 11 and 14), instead of the eigenvalues of both in
+        !! stress_eq and their decompositions in each derivative binding. Same operations as those
+        !! three bindings, so the same results bit for bit (spectral_decomposition takes its
+        !! eigenvalues from eigenvals, as stress_eq does).
+        !! Called by closest_point_iter through the stressEq_and_derivatives binding.
+        use muscle_math_spectral_derivs, only : spectral_decomposition
+        implicit none
+        class(Yld2004), intent(in) :: self
+        type(ten_3D2Osym), intent(in) :: stress
+        real(real64), intent(out) :: f
+        type(ten_3D2Osym), intent(out) :: df
+        type(ten_3D4O3sym), intent(out) :: ddf
+
+        real(real64) :: lp(3), lpp(3), Vp(3,3), Vpp(3,3), dfp(3), dfpp(3)
+        real(real64) :: d2fp(3,3), d2fpp(3,3), d2fx(3,3)
+
+        call spectral_decomposition(linear_transform(self%Lp, self%cp_shear, stress), lp, Vp)
+        call spectral_decomposition(linear_transform(self%Lpp, self%cpp_shear, stress), lpp, Vpp)
+        f = equivalent_from_principal(self, lp, lpp)
+        call principal_derivatives(self, lp, lpp, dfp, dfpp, d2fp, d2fpp, d2fx)
+        df = gradient_from_spectral(self, Vp, Vpp, dfp, dfpp)
+        ddf = hessian_from_spectral(self, lp, lpp, Vp, Vpp, dfp, dfpp, d2fp, d2fpp, d2fx)
+    end subroutine stressEq_and_derivatives_yld2004
+
+    pure function joint_evaluation_yld2004() result(res)
+        !! True: stressEq_and_derivatives_yld2004 shares the decompositions of Sp and Spp, so the
+        !! return mapping calls it instead of the three bindings. Called by closest_point_iter.
+        implicit none
+        logical :: res
+
+        res = .true.
+    end function joint_evaluation_yld2004
+
+    pure function equivalent_from_principal(self, lp, lpp) result(res)
+        ! (phi/4)**(1/a) from the principal values of Sp and Spp (Barlat et al., 2005, Eq. 14).
+        ! Called by stress_eq and stressEq_and_derivatives_yld2004.
+        implicit none
+        class(Yld2004), intent(in) :: self
+        real(real64), intent(in) :: lp(3), lpp(3)
+        real(real64) :: res
+
+        res = (0.25D0*(abs(lp(1) - lpp(1))**self%a + abs(lp(1) - lpp(2))**self%a &
+                       + abs(lp(1) - lpp(3))**self%a                             &
+                       + abs(lp(2) - lpp(1))**self%a + abs(lp(2) - lpp(2))**self%a &
+                       + abs(lp(2) - lpp(3))**self%a                             &
+                       + abs(lp(3) - lpp(1))**self%a + abs(lp(3) - lpp(2))**self%a &
+                       + abs(lp(3) - lpp(3))**self%a))**(1D0/self%a)
+    end function equivalent_from_principal
+
+    pure function gradient_from_spectral(self, Vp, Vpp, dfp, dfpp) result(res)
+        ! Lp^T : Gp + Lpp^T : Gpp from the eigenvectors and the principal derivatives.
+        ! Called by dstressEq_dstress_yld2004 and stressEq_and_derivatives_yld2004.
+        use muscle_math_spectral_derivs, only : spectral_gradient
+        implicit none
+        class(Yld2004), intent(in) :: self
+        real(real64), intent(in) :: Vp(3,3), Vpp(3,3), dfp(3), dfpp(3)
+        type(ten_3D2Osym) :: res
+
+        res = pull_back(self%Lp, self%cp_shear, spectral_gradient(Vp, dfp)) &
+              + pull_back(self%Lpp, self%cpp_shear, spectral_gradient(Vpp, dfpp))
+    end function gradient_from_spectral
+
+    pure function hessian_from_spectral(self, lp, lpp, Vp, Vpp, dfp, dfpp, d2fp, d2fpp, d2fx) result(res)
+        ! Lp^T Hp Lp + Lpp^T Hpp Lpp + Lp^T M Lpp + (Lp^T M Lpp)^T from the spectral data.
+        ! Called by ddstressEq_ddstress_yld2004 and stressEq_and_derivatives_yld2004.
+        use muscle_math_spectral_derivs, only : spectral_gradient, spectral_hessian
+        implicit none
+        class(Yld2004), intent(in) :: self
+        real(real64), intent(in) :: lp(3), lpp(3), Vp(3,3), Vpp(3,3), dfp(3), dfpp(3)
+        real(real64), intent(in) :: d2fp(3,3), d2fpp(3,3), d2fx(3,3)
+        type(ten_3D4O3sym) :: res
+
+        type(ten_3D2Osym) :: a1, a2, a3, b1, b2, b3
+
         ! Cross term: Lp^T M Lpp + (Lp^T M Lpp)^T = sum_i 2 sym(A_i (x) B_i), with
         ! A_i = Lp^T : Ep_i and B_i = Lpp^T : sum_j d2f/dlp_i dlpp_j Epp_j
         a1 = pull_back(self%Lp, self%cp_shear, spectral_gradient(Vp, [1D0, 0D0, 0D0]))
@@ -137,7 +210,7 @@ contains
         res = pull_back_hessian(self%Lp, self%cp_shear, spectral_hessian(lp, Vp, dfp, d2fp))     &
               + pull_back_hessian(self%Lpp, self%cpp_shear, spectral_hessian(lpp, Vpp, dfpp, d2fpp)) &
               + 2D0*((a1 .tdotsym. b1) + (a2 .tdotsym. b2) + (a3 .tdotsym. b3))
-    end function ddstressEq_ddstress_yld2004
+    end function hessian_from_spectral
 
     pure subroutine principal_derivatives(self, lp, lpp, dfp, dfpp, d2fp, d2fpp, d2fx)
         ! Derivatives of f = (phi/4)**(1/a) with respect to lam'_i and lam''_j (Barlat et al.,

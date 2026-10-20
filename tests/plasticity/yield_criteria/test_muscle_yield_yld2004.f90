@@ -17,6 +17,9 @@ program test_muscle_yield_yld2004
     call test_Yld2004_hessian_4(passed)
     if (.not. passed) STOP 4
 
+    call test_Yld2004_joint_evaluation_5(passed)
+    if (.not. passed) STOP 5
+
     print*, "Passed!", passed
     STOP 0
 end program test_muscle_yield_yld2004
@@ -294,3 +297,45 @@ subroutine test_Yld2004_hessian_4(passed)
     hx = h .ddot. x
     call check_approx(passed, "Yld2004 Hessian vs reference: AA2090-T3, H : X", hx, expected, tol=TOL)
 end subroutine test_Yld2004_hessian_4
+
+subroutine test_Yld2004_joint_evaluation_5(passed)
+    ! yld%stressEq_and_derivatives against stress_eq, dstressEq_dstress and ddstressEq_ddstress
+    ! called one by one, on the four materials and five states of the derivative tests: one
+    ! decomposition of Sp and one of Spp serve the three results. Also checks that Yld2004
+    ! declares joint_evaluation(), so that the return mapping uses the joint evaluation.
+    ! Called by program test_muscle_yield_yld2004 (STOP 5)
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_yield_yld2004
+    use muscle_test_utils
+    implicit none
+    logical, intent(out) :: passed
+
+    ! Same operations in the same order as the three bindings, so the same results bit for bit.
+    ! Measured: 0 difference; the relative tolerance 1e-14 (~50 eps) leaves margin for other
+    ! compilers
+    real(real64), parameter :: TOL = 1.0D-14
+    type(Yld2004) :: yld(4)
+    type(ten_3D2Osym) :: s(5), df
+    type(ten_3D4O3sym) :: ddf
+    real(real64) :: f
+    integer :: m, i
+    character(len=64) :: label
+
+    passed = .true.
+    call Yld2004_derivative_materials(yld)
+    call Yld2004_test_states(s)
+    call check_true(passed, "Yld2004 declares joint_evaluation", yld(1)%joint_evaluation())
+    do m = 1, 4
+        do i = 1, 5
+            call yld(m)%stressEq_and_derivatives(s(i), f, df, ddf)
+            write(label, '(a, i0, a, i0)') "Yld2004 joint stress_eq: material ", m, ", state ", i
+            call check_approx(passed, trim(label), f, yld(m)%stress_eq(s(i)), tol=TOL)
+            write(label, '(a, i0, a, i0)') "Yld2004 joint gradient: material ", m, ", state ", i
+            call check_approx(passed, trim(label), df, yld(m)%dstressEq_dstress(s(i)), tol=TOL)
+            write(label, '(a, i0, a, i0)') "Yld2004 joint Hessian: material ", m, ", state ", i
+            call check_approx(passed, trim(label), ddf, yld(m)%ddstressEq_ddstress(s(i)), tol=TOL)
+            if (.not. passed) return
+        end do
+    end do
+end subroutine test_Yld2004_joint_evaluation_5
