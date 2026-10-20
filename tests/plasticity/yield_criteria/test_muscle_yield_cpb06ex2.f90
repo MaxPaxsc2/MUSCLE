@@ -14,6 +14,10 @@ program test_muscle_yield_cpb06ex2
     if (.not. passed) STOP 4
     call test_CPB06ex2_pressure_insensitive(passed)
     if (.not. passed) STOP 5
+    call test_CPB06ex2_gradient_vs_numeric(passed)
+    if (.not. passed) STOP 6
+    call test_CPB06ex2_gradient_analytical(passed)
+    if (.not. passed) STOP 7
     print*, "Passed!", passed
     STOP 0
 end program test_muscle_yield_cpb06ex2
@@ -76,7 +80,8 @@ subroutine CPB06ex2_test_materials(yld)
     ! Plunkett et al. (2008), Tables 2, 8, 1: steel, 6111-T4 and AZ31B, respectively.
     ! The shear order yz,xz,xy of the paper is permuted to library xy,yz,xz.
     ! AZ31B lacks out-of-plane shear data: unit factors there are synthetic test inputs.
-    ! Called by test_CPB06ex2_paper_tables and test_CPB06ex2_tension_compression_asymmetry
+    ! Called by test_CPB06ex2_paper_tables, test_CPB06ex2_tension_compression_asymmetry,
+    ! test_CPB06ex2_pressure_insensitive and the gradient tests
     use muscle_yield_cpb06ex2
     implicit none
     type(CPB06ex2), intent(out) :: yld(3)
@@ -180,3 +185,64 @@ subroutine test_CPB06ex2_pressure_insensitive(passed)
     call check_approx(passed, 'AZ31 coupled state plus pressure 250', yld(3)%stress_eq(s + p), &
                       yld(3)%stress_eq(s), tol=TOL)
 end subroutine test_CPB06ex2_pressure_insensitive
+
+subroutine test_CPB06ex2_gradient_vs_numeric(passed)
+    ! Gradient against the finite-difference gradient of the base class, for the three
+    ! materials in a state with normal and shear components together, and for 6111-T4 in a
+    ! rotated state where two principal values of Sigma differ by about 1e-8 relatively
+    ! Called by program test_muscle_yield_cpb06ex2 (STOP 6)
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_yield_cpb06ex2
+    use muscle_test_utils
+    implicit none
+    logical, intent(out) :: passed
+    ! Central differences of the base class: truncation and the rounding of eigenvals.
+    ! Measured: 1.2e-10 or less
+    real(real64), parameter :: TOL = 1D-8
+    type(CPB06ex2) :: yld(3)
+    type(ten_3D2Osym) :: s
+    passed = .true.
+    call CPB06ex2_test_materials(yld)
+    call s%init((/120.5D0,-35.25D0,60.75D0,42.5D0,-28D0,33.25D0/))
+    ! Steel: k and kp of opposite sign, a = 5
+    call check_approx(passed, 'gradient vs numeric: steel', yld(1)%dstressEq_dstress(s), &
+                      yld(1)%dstressEq_dstress_numeric(s), tol=TOL)
+    ! 6111-T4: a = 12, the largest powers of the three
+    call check_approx(passed, 'gradient vs numeric: 6111-T4', yld(2)%dstressEq_dstress(s), &
+                      yld(2)%dstressEq_dstress_numeric(s), tol=TOL)
+    ! AZ31B: kp = 0.9, the second transformation almost one-sided
+    call check_approx(passed, 'gradient vs numeric: AZ31B', yld(3)%dstressEq_dstress(s), &
+                      yld(3)%dstressEq_dstress_numeric(s), tol=TOL)
+    call s%init((/197.95561360136386D0,-58.04950942270237D0,-139.90610417866154D0, &
+                  -50.24571382486021D0,11.771438358965758D0,-51.20999705196427D0/))
+    call check_approx(passed, 'gradient vs numeric: 6111-T4, close pair', &
+                      yld(2)%dstressEq_dstress(s), yld(2)%dstressEq_dstress_numeric(s), tol=TOL)
+end subroutine test_CPB06ex2_gradient_vs_numeric
+
+subroutine test_CPB06ex2_gradient_analytical(passed)
+    ! Gradient of 6111-T4 against Euler's identity for the homogeneous f (grad : stress = f)
+    ! and against an independent 90-digit reference computed with traces of powers of
+    ! Sigma and Sigmap (no eigenvalues), in a state with all components
+    ! Called by program test_muscle_yield_cpb06ex2 (STOP 7)
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_yield_cpb06ex2
+    use muscle_test_utils
+    implicit none
+    logical, intent(out) :: passed
+    ! Exact references: round-off only. Measured: 2.8e-16 or less
+    real(real64), parameter :: TOL = 1D-12
+    type(CPB06ex2) :: yld(3)
+    type(ten_3D2Osym) :: s, expected
+    passed = .true.
+    call CPB06ex2_test_materials(yld)
+    call s%init((/120.5D0,-35.25D0,60.75D0,42.5D0,-28D0,33.25D0/))
+    call check_approx(passed, 'gradient Euler identity: 6111-T4', &
+                      yld(2)%dstressEq_dstress(s) .ddot. s, yld(2)%stress_eq(s), tol=TOL)
+    call expected%init((/0.63491427307714846058430D0, -0.8014554330786033866660D0, &
+                         0.16654116000145492608174D0, 0.29454772703368041095476D0, &
+                         -0.2025437658446382337026D0, 0.28693805299310551585208D0/))
+    call check_approx(passed, 'gradient vs reference: 6111-T4', yld(2)%dstressEq_dstress(s), &
+                      expected, tol=TOL)
+end subroutine test_CPB06ex2_gradient_analytical
