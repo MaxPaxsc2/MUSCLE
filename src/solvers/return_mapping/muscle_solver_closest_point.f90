@@ -71,6 +71,7 @@ module muscle_solver_closest_point
             type(ten_3D2Osym)  :: df, residual1, dstrain_p, stress
             type(ten_3D4O3sym) :: elas_tan, elas_inv, hess, ddf
             real(real64)       :: hard, dhard, f, norm_res
+            logical            :: joint  ! The criterion evaluates f, df and ddf together
 
             ! 1. Read state t_n
             strain_p_n  = history%state_n%strain_p
@@ -80,15 +81,22 @@ module muscle_solver_closest_point
             strain_p  = history%state_np1%strain_p
             strain_pf = history%state_np1%strain_pf
 
-            ! 3. Elastic Tangent & Current Stress
+            ! 3. Elastic Tangent, Current Stress, Equivalent Stress and its Gradient (and the Hessian
+            ! too when the criterion evaluates the three together)
             elas_tan = self%elasticity%dstress_dstrain(strain - strain_p)
             stress   = self%elasticity%stress(strain - strain_p)
             hard     = self%hardening%stress(strain_pf)
-            f        = self%yield%stress_eq(stress) - hard
+            joint    = self%yield%joint_evaluation()
+            if (joint) then
+                call self%yield%stressEq_and_derivatives(stress, f, df, ddf)
+                f = f - hard
+            else
+                f  = self%yield%stress_eq(stress) - hard
+                df = self%yield%dstressEq_dstress(stress)
+            end if
 
-            ! 4. Derivatives & Plastic Strain Residual
+            ! 4. Plastic Strain Residual
             dhard     = self%hardening%dstress_dep(strain_pf)
-            df        = self%yield%dstressEq_dstress(stress)
             residual1 = strain_p_n - strain_p + (dgamma * df)
             norm_res  = sqrt(sum(residual1%vals**2))
 
@@ -100,7 +108,7 @@ module muscle_solver_closest_point
             end if
 
             ! 6. Compute Hessian & Raw Newton-Raphson correction (ddgamma)
-            ddf  = self%yield%ddstressEq_ddstress(stress)
+            if (.not. joint) ddf = self%yield%ddstressEq_ddstress(stress)
             elas_inv = .inv. elas_tan
             hess = .inv. (elas_inv + dgamma * ddf)
 
