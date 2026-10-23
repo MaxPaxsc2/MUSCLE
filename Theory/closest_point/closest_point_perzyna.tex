@@ -1,0 +1,153 @@
+\documentclass[12pt]{article}
+\usepackage[letterpaper, margin=1.5cm]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{empheq}
+\setlength\parindent{0pt}
+
+\begin{document}
+
+\section*{Base de los modelos de sobretensi\'on (Perzyna)}
+
+En los documentos anteriores (\texttt{closest\_point.tex} y \texttt{closest\_point\_visco\_hard.tex}) la condici\'on de carga se impone como \textbf{consistencia}: $f\left(\pmb{\sigma}_{n+1}, \bar\varepsilon^p_{n+1}\right) = 0$. En \texttt{closest\_point\_visco\_hard.tex} la viscosidad entra \'unicamente a trav\'es de una tensi\'on de fluencia que depende de la velocidad, $Y\left(\bar\varepsilon^p, \dot{\bar\varepsilon}^p\right)$, de modo que la superficie de fluencia sigue siendo estricta ($f=0$ durante la carga).
+
+En los modelos de \textbf{sobretensi\'on} (\textit{overstress}) la idea es distinta: existe una superficie de fluencia \textbf{est\'atica} y el estado de tensiones puede salir de ella. La velocidad de flujo plástico queda determinada por cu\'anto se excede dicha superficie:
+\begin{align}
+    f\left(\pmb{\sigma}, \bar\varepsilon^p\right) &= \sigma_{eq}\left(\pmb{\sigma}\right) - Y\left(\bar\varepsilon^p\right) \\
+    \pmb{\dot\varepsilon}^p &= \dot\lambda\, \partial_{\pmb{\sigma}}\sigma_{eq}\left(\pmb{\sigma}\right) \\
+    \dot{\bar\varepsilon}^p &= \dot\lambda \\
+    \dot\lambda &= g\left(\sigma_{eq}, \bar\varepsilon^p\right) \geq 0 \label{eqn:flow_general}
+\end{align}
+con $g = 0$ si $f \leq 0$ y $g > 0$ si $f > 0$. Aqu\'i $Y\left(\bar\varepsilon^p\right)$ es la ley de endurecimiento est\'atica y \textbf{no} depende de la velocidad. El multiplicador $\dot\lambda$ deja de ser un multiplicador de Lagrange que se obtiene de $f=0$ y pasa a ser una \textbf{ley constitutiva} expl\'icita. No hay condiciones de Kuhn--Tucker ni de consistencia.
+
+\subsection*{Modelo de Perzyna}
+Perzyna corresponde a
+\begin{equation} \label{eqn:perzyna}
+    g = \frac{1}{\eta}\left\langle \frac{f}{Y\left(\bar\varepsilon^p\right)} \right\rangle^{N}
+      = \frac{1}{\eta}\left\langle \psi \right\rangle^{N}, \qquad
+      \psi = \frac{\sigma_{eq}}{Y\left(\bar\varepsilon^p\right)} - 1
+\end{equation}
+donde $\eta$ es la viscosidad (tiempo de relajaci\'on), $N$ el exponente de sensibilidad a la velocidad y $\langle x \rangle = \max(x, 0)$ son los par\'entesis de Macaulay. Otros modelos de la misma familia solo cambian la funci\'on $g$:
+\begin{center}
+\renewcommand\arraystretch{1.4}
+\begin{tabular}{ll}
+    Modelo & $g$ \\ \hline
+    Perzyna (potencia) / Chaboche & $\frac{1}{\eta}\left\langle \frac{f}{Y} \right\rangle^{N}$ \\
+    Bingham ($N=1$) & $\frac{1}{\eta}\left\langle \frac{f}{Y} \right\rangle$ \\
+    Norton--Hoff (sin fluencia est\'atica) & $\frac{1}{\eta}\left(\frac{\sigma_{eq}}{K}\right)^{N}$ \\
+    Bodner--Partom & $D_0 \exp\left[-\frac{1}{2}\left(\frac{Z}{\sigma_{eq}}\right)^{2N}\right]$
+\end{tabular}
+\end{center}
+Todos comparten la estructura de la ecuaci\'on~\eqref{eqn:flow_general}, as\'i que el algoritmo de retorno puede escribirse una sola vez para una $g$ gen\'erica.
+
+\subsection*{L\'imite independiente de la velocidad}
+Si $\eta \to 0$ (o $N \to \infty$) el modelo debe recuperar la plasticidad independiente de la velocidad, es decir $f \to 0$. Esta propiedad se usa m\'as abajo como verificaci\'on del algoritmo.
+
+\section*{Discretizaci\'on}
+
+Con Euler impl\'icito y $\Delta\lambda = \Delta t\,\dot\lambda$, las ecuaciones de actualizaci\'on son las mismas de \texttt{closest\_point\_visco\_hard.tex}:
+\begin{empheq}[box=\fbox]{align}
+    \pmb{\varepsilon}_{n+1}^p &= \pmb{\varepsilon}_{n}^p + \Delta\lambda\,\partial_{\pmb{\sigma}}\sigma_{eq}\left(\pmb{\sigma}_{n+1}\right) \\
+    \bar\varepsilon^p_{n+1} &= \bar\varepsilon^p_{n} + \Delta\lambda
+\end{empheq}
+Lo que cambia es que $\Delta\lambda$ ya no se determina con $f_{n+1}=0$ sino con la ley de flujo~\eqref{eqn:flow_general} evaluada al final del paso:
+\begin{equation}
+    \Delta\lambda = \Delta t\; g\left(\sigma_{eq}\left(\pmb{\sigma}_{n+1}\right), \bar\varepsilon^p_{n+1}\right)
+\end{equation}
+
+\subsection*{Residuos}
+El residuo de deformaci\'on plástica no cambia:
+\begin{equation}
+    \pmb{R}_{n+1}^{\varepsilon^p} = -\pmb{\varepsilon}_{n+1}^p + \pmb{\varepsilon}_{n}^p + \Delta\lambda\,\partial_{\pmb{\sigma}}\sigma_{eq}\left(\pmb{\sigma}_{n+1}\right)
+\end{equation}
+Lo que cambia es el segundo residuo. En el esquema de consistencia era $R^f = \sigma_{eq} - Y$. Ahora es
+\begin{empheq}[box=\fbox]{equation}
+    R_{n+1}^{\lambda} = \Delta\lambda - \Delta t\; g\left(\sigma_{eq}\left(\pmb{\sigma}_{n+1}\right), \bar\varepsilon^p_{n} + \Delta\lambda\right)
+\end{empheq}
+En particular, $f_{n+1} \neq 0$ en la soluci\'on: $f_{n+1} > 0$ es la sobretensi\'on, y el criterio de convergencia es $\left\Vert \pmb{R}^{\varepsilon^p}\right\Vert < tol$ y $\left|R^\lambda\right| < tol$ (ya no $|f| < tol$).
+
+\textbf{Forma alternativa (sobretensi\'on invertida).} Si $g$ es invertible, $R^\lambda = 0$ equivale a $\sigma_{eq} - Y\left(\bar\varepsilon^p\right)\left[1 + (\eta\dot\lambda)^{1/N}\right] = 0$, que es el mismo esquema de \texttt{closest\_point\_visco\_hard.tex} con $Y\left(\bar\varepsilon^p, \dot{\bar\varepsilon}^p\right) = Y\left(\bar\varepsilon^p\right)\left[1 + (\eta\dot{\bar\varepsilon}^p)^{1/N}\right]$. Sin embargo, para $N>1$ la derivada respecto de $\dot{\bar\varepsilon}^p$ diverge en $\dot{\bar\varepsilon}^p = 0$, que es justamente el punto de partida de Newton ($\Delta\lambda^{(0)}=0$). Por eso se prefiere la forma $R^\lambda$ de arriba, que es suave para $N \geq 1$.
+
+\section*{Linealizaci\'on}
+
+Se definen, como antes, $\pmb{n} = \partial_{\pmb{\sigma}}\sigma_{eq}\left(\pmb{\sigma}_{n+1}\right)$, $H = \partial_{\Delta\lambda}Y\left(\bar\varepsilon^p_{n+1}\right)$ y
+\[ \pmb{\Xi} = \left[\mathbb{C}^{-1} + \Delta\lambda\,\partial^2_{\sigma\sigma}\sigma_{eq}\left(\pmb{\sigma}_{n+1}\right)\right]^{-1} \]
+Como $\pmb{\varepsilon}_{n+1}$ es constante durante el retorno, $\Delta\pmb{\sigma}_{n+1} = -\mathbb{C}:\Delta\pmb{\varepsilon}^p_{n+1}$ y de la primera ecuaci\'on se obtiene igual que antes
+\[ \Delta\pmb{\sigma}_{n+1} = \pmb{\Xi}:\left[-\pmb{n}\,\Delta^2\lambda - \pmb{R}_{n+1}^{\varepsilon^p}\right] \]
+
+Para la ecuaci\'on de $R^\lambda$ se necesita la derivada de $g$. Con la forma de Perzyna~\eqref{eqn:perzyna}:
+\[
+    g_\psi = \frac{\partial g}{\partial \psi} = \frac{N}{\eta}\left\langle\psi\right\rangle^{N-1}, \qquad
+    d\psi = \frac{\pmb{n}:d\pmb{\sigma}}{Y} - \frac{\sigma_{eq}\,H}{Y^2}\,d\Delta\lambda
+\]
+Se definen las constantes efectivas
+\begin{equation}
+    c = \frac{g_\psi}{Y}, \qquad \tilde H = \frac{\sigma_{eq}}{Y}\,H = \left(1+\psi\right)H
+\end{equation}
+de modo que
+\[
+    dR^\lambda = d\Delta\lambda - \Delta t\,c\left[\pmb{n}:d\pmb{\sigma} - \tilde H\,d\Delta\lambda\right]
+\]
+Para otra funci\'on $g$ basta con redefinir $c$ y $\tilde H$ (la estructura es id\'entica). La ecuaci\'on linealizada $dR^\lambda + R^\lambda = 0$ queda
+\[ \Delta^2\lambda - \Delta t\,c\left[\pmb{n}:\Delta\pmb{\sigma}_{n+1} - \tilde H\,\Delta^2\lambda\right] + R^\lambda_{n+1} = 0 \]
+Reemplazando $\Delta\pmb{\sigma}_{n+1}$:
+\[
+    \Delta^2\lambda\left[1 + \Delta t\,c\,\tilde H\right] + \Delta t\,c\,\pmb{n}:\pmb{\Xi}:\pmb{n}\,\Delta^2\lambda + \Delta t\,c\,\pmb{n}:\pmb{\Xi}:\pmb{R}^{\varepsilon^p}_{n+1} + R^\lambda_{n+1} = 0
+\]
+Factorizando y despejando:
+\begin{empheq}[box=\fbox]{equation}
+    \Delta^2\lambda = -\,\frac{R^\lambda_{n+1} + \Delta t\,c\;\pmb{n}:\pmb{\Xi}:\pmb{R}^{\varepsilon^p}_{n+1}}{1 + \Delta t\,c\left[\pmb{n}:\pmb{\Xi}:\pmb{n} + \tilde H\right]}
+\end{empheq}
+Dividiendo numerador y denominador por $\Delta t\,c$:
+\begin{equation}
+    \Delta^2\lambda = -\,\frac{\dfrac{R^\lambda_{n+1}}{\Delta t\,c} + \pmb{n}:\pmb{\Xi}:\pmb{R}^{\varepsilon^p}_{n+1}}{\pmb{n}:\pmb{\Xi}:\pmb{n} + \tilde H + \dfrac{1}{\Delta t\,c}} \label{eqn:dlambda_perzyna}
+\end{equation}
+
+\subsection*{Verificaci\'on: l\'imite independiente de la velocidad}
+Cuando $\Delta t\,c \to \infty$ (viscosidad nula), $R^\lambda/(\Delta t\,c) \to -\,f_{n+1}$ (porque $R^\lambda \approx -\Delta t\,g$ y $g \approx c\,f$ para $g$ lineal en $f$), $\tilde H \to H$ y $1/(\Delta t\,c) \to 0$. La ecuaci\'on~\eqref{eqn:dlambda_perzyna} se reduce a
+\[
+    \Delta^2\lambda = \frac{f_{n+1} - \pmb{n}:\pmb{\Xi}:\pmb{R}^{\varepsilon^p}_{n+1}}{\pmb{n}:\pmb{\Xi}:\pmb{n} + H}
+\]
+que es exactamente la expresi\'on de \texttt{closest\_point\_visco\_hard.tex}. En el c\'odigo, esto significa que \textbf{la \'unica diferencia} respecto del solver actual es el segundo t\'ermino del denominador, $1/(\Delta t\,c)$, y el numerador, que pasa de $f$ a $-R^\lambda/(\Delta t\,c)$.
+
+\subsection*{Actualizaci\'on de las variables}
+Igual que en el esquema anterior:
+\[ \Delta\lambda^{(k+1)} = \Delta\lambda^{(k)} + \Delta^2\lambda, \qquad \bar\varepsilon^{p}_{n+1} = \bar\varepsilon^p_n + \Delta\lambda^{(k+1)} \]
+\[ \Delta\pmb{\varepsilon}^{p^{(k)}}_{n+1} = -\mathbb{C}^{-1}:\Delta\pmb{\sigma}_{n+1} = \mathbb{C}^{-1}:\pmb{\Xi}:\left[\pmb{R}^{\varepsilon^p}_{n+1} + \Delta^2\lambda\,\pmb{n}\right] \]
+Se debe imponer $\Delta\lambda \geq 0$.
+
+\subsection*{Caso el\'astico}
+Con la deformaci\'on plástica del paso anterior se calcula $\pmb{\sigma}^{trial}_{n+1}$ y $f^{trial}_{n+1}$. Si $f^{trial}_{n+1} \leq 0$ entonces $g=0$, $\Delta\lambda=0$ y el paso es el\'astico. Si $f^{trial}_{n+1} > 0$ hay flujo viscoplástico (aunque $f_{n+1}$ no sea cero al final) y se inicia Newton en $\Delta\lambda^{(0)} = 0$. Con $\psi^{trial} > 0$ la derivada $g_\psi$ es finita incluso para $N<1$.
+
+\section*{Tangente consistente}
+Hooke diferenciado es igual que antes:
+\[ d\pmb{\sigma}_{n+1} = \pmb{\Xi}:\left[d\pmb{\varepsilon}_{n+1} - d\Delta\lambda\;\pmb{n}\right] \]
+Ahora se diferencia $R^\lambda = 0$ (en vez de $f=0$):
+\[ d\Delta\lambda = \Delta t\,c\left[\pmb{n}:d\pmb{\sigma}_{n+1} - \tilde H\,d\Delta\lambda\right] \]
+\[ d\Delta\lambda\left[1 + \Delta t\,c\,\tilde H\right] = \Delta t\,c\;\pmb{n}:\pmb{\Xi}:\left[d\pmb{\varepsilon}_{n+1} - d\Delta\lambda\;\pmb{n}\right] \]
+\[
+    d\Delta\lambda = \frac{\pmb{n}:\pmb{\Xi}:d\pmb{\varepsilon}_{n+1}}{\pmb{n}:\pmb{\Xi}:\pmb{n} + \tilde H + \dfrac{1}{\Delta t\,c}}
+\]
+y finalmente
+\begin{empheq}[box=\fbox]{equation}
+    d\pmb{\sigma}_{n+1} = \left[\pmb{\Xi} - \frac{\pmb{\Xi}:\pmb{n} \otimes \pmb{n}:\pmb{\Xi}}{\pmb{n}:\pmb{\Xi}:\pmb{n} + \tilde H + \dfrac{1}{\Delta t\,c}}\right]:d\pmb{\varepsilon}_{n+1}
+\end{empheq}
+Dos l\'imites sirven de verificaci\'on: si $\Delta t\,c \to \infty$ se recupera la tangente de plasticidad independiente de la velocidad ($\tilde H \to H$), y si $\Delta t\,c \to 0$ (viscosidad muy alta) el t\'ermino correctivo desaparece y la tangente tiende a $\pmb{\Xi}\to\mathbb{C}$, es decir al comportamiento el\'astico.
+
+\section*{Resumen de cambios respecto de \texttt{closest\_point\_visco\_hard.tex}}
+\begin{center}
+\renewcommand\arraystretch{1.5}
+\begin{tabular}{lll}
+    & Consistencia con $Y(\bar\varepsilon^p, \dot{\bar\varepsilon}^p)$ & Perzyna (sobretensi\'on) \\ \hline
+    $\pmb{R}^{\varepsilon^p}$ & igual & igual \\
+    Segundo residuo & $R^f = \sigma_{eq} - Y$ & $R^\lambda = \Delta\lambda - \Delta t\,g$ \\
+    Convergencia & $|f|<tol$ & $|R^\lambda|<tol$ \\
+    Denominador de $\Delta^2\lambda$ & $\pmb{n}:\pmb{\Xi}:\pmb{n} + \partial_{\Delta\lambda}Y$ & $\pmb{n}:\pmb{\Xi}:\pmb{n} + \tilde H + \frac{1}{\Delta t\,c}$ \\
+    Tangente & mismo, con $\partial_{\Delta\lambda}Y$ & mismo, con $\tilde H + \frac{1}{\Delta t\,c}$ \\
+    Ley del material & $Y(\bar\varepsilon^p,\dot{\bar\varepsilon}^p)$ & $Y(\bar\varepsilon^p)$ y $g$
+\end{tabular}
+\end{center}
+
+%% AGREGAR NUMÉRICO
+
+\end{document}
