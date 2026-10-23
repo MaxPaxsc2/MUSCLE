@@ -207,7 +207,9 @@ contains
        end subroutine dgesv
 
 #ifdef USE_MKL
-       subroutine mkl_set_num_threads_local(nth) bind(C, name="mkl_set_num_threads_local")
+       ! Bind to the C entry point (by value). The lowercase symbol
+       ! mkl_set_num_threads_local is the MKL Fortran entry (by reference).
+       subroutine mkl_set_num_threads_local(nth) bind(C, name="MKL_Set_Num_Threads_Local")
          import :: c_int
          integer(c_int), value :: nth
        end subroutine mkl_set_num_threads_local
