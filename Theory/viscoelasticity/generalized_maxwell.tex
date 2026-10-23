@@ -1,0 +1,109 @@
+\documentclass[12pt]{article}
+\usepackage[letterpaper, margin=1.5cm]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{empheq}
+\setlength\parindent{0pt}
+
+\begin{document}
+
+\section*{Modelo de Maxwell generalizado (series de Prony)}
+
+Se considera un material isótropo con relajación solo en la parte desviadora (lo habitual en metales):
+\begin{equation}
+    G(t) = G_\infty + \sum_{k=1}^{N} G_k\, e^{-t/\tau_k}, \qquad K(t) = K
+\end{equation}
+con $G_0 = G(0) = G_\infty + \sum_k G_k$ el módulo instantáneo. Con $\pmb{e} = \textnormal{dev}\,\pmb{\varepsilon}^e$, la tensión es
+\begin{align}
+    \pmb{\sigma} &= K\,\textnormal{tr}(\pmb{\varepsilon}^e)\,\pmb{I} + 2G_\infty\,\pmb{e} + \sum_{k=1}^{N} \pmb{s}_k \\
+    \dot{\pmb{s}}_k + \frac{\pmb{s}_k}{\tau_k} &= 2G_k\,\dot{\pmb{e}} \label{eqn:branch}
+\end{align}
+donde $\pmb{s}_k$ es la tensión (desviadora) de la rama $k$. Casos particulares: un elemento de Maxwell ($G_\infty = 0$, $N = 1$) y el sólido lineal estándar o de Zener ($N = 1$).
+
+\textbf{Entrada normalizada (como Abaqus).} Con $E$ y $\nu$ instantáneos y $g_k = G_k/G_0$:
+\[ G_0 = \frac{E}{2(1+\nu)}, \quad K = \frac{E}{3(1-2\nu)}, \quad G_k = g_k G_0, \quad G_\infty = G_0\left(1 - \sum_k g_k\right), \quad \sum_k g_k \leq 1 \]
+
+\section*{Integración exacta en el paso}
+
+Suponiendo que $\pmb{e}$ varía linealmente en $[t_n, t_{n+1}]$, es decir $\dot{\pmb{e}} = \Delta\pmb{e}/\Delta t$ constante, la ecuación~\eqref{eqn:branch} se integra en forma exacta:
+\[
+    \pmb{s}_k^{n+1} = e^{-\Delta t/\tau_k}\,\pmb{s}_k^n + 2G_k \int_{t_n}^{t_{n+1}} e^{-(t_{n+1}-s)/\tau_k}\,ds\; \frac{\Delta\pmb{e}}{\Delta t}
+\]
+Se definen
+\begin{equation}
+    a_k = e^{-\Delta t/\tau_k}, \qquad \gamma_k = \frac{1 - a_k}{\Delta t/\tau_k}
+\end{equation}
+y queda
+\begin{empheq}[box=\fbox]{equation}
+    \pmb{s}_k^{n+1} = a_k\,\pmb{s}_k^n + 2G_k\gamma_k\left(\pmb{e}^{n+1} - \pmb{e}^n\right)
+\end{empheq}
+Para $x = \Delta t/\tau_k$ pequeño, $\gamma_k$ se evalúa con la serie $\gamma_k \approx 1 - x/2 + x^2/6$ para evitar la cancelación numérica de $1 - e^{-x}$.
+
+\section*{Forma afín: elasticidad congelada}
+
+Reemplazando en la tensión:
+\[
+    \pmb{\sigma}_{n+1} = K\,\textnormal{tr}(\pmb{\varepsilon}^e_{n+1})\,\pmb{I}
+    + 2\left(G_\infty + \sum_k G_k\gamma_k\right)\pmb{e}^{n+1}
+    + \sum_k\left(a_k\,\pmb{s}_k^n - 2G_k\gamma_k\,\pmb{e}^n\right)
+\]
+es decir
+\begin{empheq}[box=\fbox]{gather}
+    \pmb{\sigma}_{n+1} = \mathbb{C}^{alg} : \pmb{\varepsilon}^e_{n+1} + \pmb{\sigma}^{hist}_n \\
+    \mathbb{C}^{alg} = 3K\,\mathbb{P}^{vol} + 2G^{alg}\,\mathbb{P}^{dev}, \qquad
+    G^{alg} = G_\infty + \sum_k G_k\gamma_k \\
+    \pmb{\sigma}^{hist}_n = \sum_k\left(a_k\,\pmb{s}_k^n - 2G_k\gamma_k\,\pmb{e}^n\right)
+\end{empheq}
+$\mathbb{C}^{alg}$ depende solo de $\Delta t$ y $\pmb{\sigma}^{hist}_n$ solo del estado convergido en $t_n$. Ambos son constantes durante las iteraciones de Newton: dentro del paso el material se comporta como un elástico lineal isótropo con $(K, G^{alg})$ más una tensión inicial.
+
+\subsection*{Límites}
+\begin{itemize}
+    \item $\Delta t \to 0$: $a_k \to 1$, $\gamma_k \to 1$, $G^{alg} \to G_0$ (respuesta instantánea).
+    \item $\Delta t \to \infty$: $a_k \to 0$, $\gamma_k \to 0$, $G^{alg} \to G_\infty$ y $\pmb{\sigma}^{hist} \to 0$ (respuesta de equilibrio).
+\end{itemize}
+
+\subsection*{Soluciones analíticas para verificación}
+Como la integración es exacta para $\dot{\pmb{e}}$ constante por tramos, ambas se reproducen con cualquier $\Delta t$:
+\begin{itemize}
+    \item Relajación (escalón $\pmb{\varepsilon}_0$ y luego deformación constante):
+        $\pmb{\sigma}(t) = K\,\textnormal{tr}(\pmb{\varepsilon}_0)\,\pmb{I} + 2G(t)\,\textnormal{dev}\,\pmb{\varepsilon}_0$.
+    \item Velocidad constante $\pmb{D}$:
+        $\pmb{\sigma}(t) = K\,\textnormal{tr}(\pmb{D})\,t\,\pmb{I} + 2\,\textnormal{dev}\,\pmb{D}\left[G_\infty t + \sum_k G_k\tau_k\left(1 - e^{-t/\tau_k}\right)\right]$.
+\end{itemize}
+
+\section*{Acople con el return mapping}
+
+Con plasticidad, las ramas se alimentan de la deformación elástica $\pmb{\varepsilon}^e = \pmb{\varepsilon} - \pmb{\varepsilon}^p$:
+\[ \pmb{\sigma}_{n+1} = \mathbb{C}^{alg} : \left(\pmb{\varepsilon}_{n+1} - \pmb{\varepsilon}^p_{n+1}\right) + \pmb{\sigma}^{hist}_n \]
+Como $\pmb{\sigma}^{hist}_n$ no depende de $\pmb{\varepsilon}^p_{n+1}$, en las iteraciones del closest point se sigue cumpliendo
+\[ \Delta\pmb{\sigma}_{n+1} = -\mathbb{C}^{alg} : \Delta\pmb{\varepsilon}^p_{n+1}, \qquad
+   \pmb{\Xi} = \left[\left(\mathbb{C}^{alg}\right)^{-1} + \Delta\gamma\,\partial^2_{\sigma\sigma}\sigma_{eq}\right]^{-1} \]
+y la tangente consistente es la misma de \texttt{closest\_point.tex} (o de \texttt{closest\_point\_perzyna.tex}) con $\mathbb{C} \to \mathbb{C}^{alg}$. Es decir, \textbf{el algoritmo plástico no cambia}: solo recibe otra elasticidad. Una vez convergido el return mapping, se actualizan las ramas con $\pmb{\varepsilon}^e_{n+1} = \pmb{\varepsilon}_{n+1} - \pmb{\varepsilon}^p_{n+1}$.
+
+\section*{Implementación}
+
+El trabajo se separa según cuántas veces hay que hacerlo:
+\begin{center}
+\renewcommand\arraystretch{1.4}
+\begin{tabular}{lll}
+    Procedimiento & Calcula & Frecuencia \\ \hline
+    \texttt{coefficients(dt)} & $a_k$, $2G_k\gamma_k$, $K$, $G^{alg}$ & una vez por paso, para todo el modelo \\
+    \texttt{freeze(coefs, history)} & $\mathbb{C}^{alg}$, $\pmb{\sigma}^{hist}_n$ & una vez por paso y punto \\
+    \texttt{update(coefs, eps\_e, history)} & $\pmb{s}_k^{n+1}$ & una vez por solución local convergida \\
+\end{tabular}
+\end{center}
+El objeto congelado (\texttt{Elasticity\_frozen}) es un \texttt{Base\_elasticity} normal y guarda solo $(K, G^{alg}, \pmb{\sigma}^{hist})$: tensión y tangente se evalúan con escalares, y su inversa también es analítica, $\left(\mathbb{C}^{alg}\right)^{-1} = \mathbb{P}^{vol}/(3K) + \mathbb{P}^{dev}/(2G^{alg})$. El estado tiene tamaño fijo (\texttt{MAX\_VISCO\_BRANCHES}), así que copiarlo no requiere memoria dinámica.
+
+\section*{Grandes deformaciones}
+
+\textbf{Formulación logarítmica material} ($\pmb{H} = \ln\pmb{U}$, conjugada $\pmb{\tau}_R$, módulo \texttt{muscle\_kin\_material\_logarithmic}). Las variables de historia viven en la configuración material y no rotan, así que el modelo se aplica tal cual sobre $\pmb{H}$:
+\[ \pmb{\tau}_R^{n+1} = \mathbb{C}^{alg} : \left(\pmb{H}_{n+1} - \pmb{H}^p_{n+1}\right) + \pmb{\tau}^{hist}_{R,n} \]
+La parte geométrica (\texttt{to\_Cauchy}, \texttt{to\_spatial\_tangent}) la resuelve el módulo de cinemática. El par $(\ln\pmb{U}, \pmb{\tau}_R)$ es exactamente conjugado solo si tensión y deformación son coaxiales; con carga no proporcional las $\pmb{s}_k$ pueden dejar de serlo, pero con deformaciones elásticas pequeñas (metales) el error es despreciable. Es la misma hipótesis que usa la plasticidad finita sobre este módulo.
+
+\textbf{Formulaciones espaciales} (lagrangiana actualizada, corrotacional). Al inicio de la llamada constitutiva hay que transportar las $\pmb{s}_k^n$ a la configuración actual de forma objetiva; por ejemplo, con la rotación incremental $\Delta\pmb{R}$:
+\[ \tilde{\pmb{s}}_k^n = \Delta\pmb{R}\,\pmb{s}_k^n\,\Delta\pmb{R}^T \]
+Dentro del return mapping $\pmb{F}_{n+1}$ está fijo, así que $\pmb{\sigma}^{hist}$ sigue siendo constante y el algoritmo no cambia. Lo que cambia es la tangente global, que suma el término $\partial\pmb{\sigma}^{hist}/\partial\pmb{F}$ del transporte.
+
+%% AGREGAR: Kelvin-Voigt (C_alg = C + eta/dt, sigma_hist = -eta:eps_n/dt), Burgers, relajación volumétrica.
+
+\end{document}

@@ -1,0 +1,1 @@
+add_muscle_test(maxwell test_muscle_visco_maxwell.f90)
