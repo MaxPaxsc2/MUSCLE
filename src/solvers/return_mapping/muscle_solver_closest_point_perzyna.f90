@@ -56,9 +56,13 @@ module muscle_solver_closest_point_perzyna
             class(Base_yield_critera), intent(in) :: yield
             integer, optional, intent(in) :: iter_nw
             real(real64), optional, intent(in) :: tol
-            self%elasticity = elasticity
-            self%viscoplastic = viscoplastic
-            self%yield = yield
+            ! Explicit reallocation: gfortran 13/14 do not reallocate on assignment when the dynamic type changes
+            if (allocated(self%elasticity)) deallocate(self%elasticity)
+            allocate(self%elasticity, source=elasticity)
+            if (allocated(self%viscoplastic)) deallocate(self%viscoplastic)
+            allocate(self%viscoplastic, source=viscoplastic)
+            if (allocated(self%yield)) deallocate(self%yield)
+            allocate(self%yield, source=yield)
 
             self%iter_nw = 200
             self%tol = 1D-8

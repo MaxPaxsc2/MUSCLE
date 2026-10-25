@@ -131,9 +131,13 @@ module muscle_solver_closest_point_time
             class(Base_viscoplastic_law), intent(in) :: hardening
             class(Base_yield_critera), intent(in) :: yield
             integer, optional, intent(in) :: iter_nw
-            self%elasticity = elasticity
-            self%hardening = hardening
-            self%yield = yield
+            ! Explicit reallocation: gfortran 13/14 do not reallocate on assignment when the dynamic type changes
+            if (allocated(self%elasticity)) deallocate(self%elasticity)
+            allocate(self%elasticity, source=elasticity)
+            if (allocated(self%hardening)) deallocate(self%hardening)
+            allocate(self%hardening, source=hardening)
+            if (allocated(self%yield)) deallocate(self%yield)
+            allocate(self%yield, source=yield)
             self%iter_nw = 200
             if (present(iter_nw)) self%iter_nw = iter_nw
         end subroutine closest_point_init

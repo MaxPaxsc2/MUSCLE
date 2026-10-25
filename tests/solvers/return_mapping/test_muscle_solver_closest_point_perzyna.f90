@@ -14,6 +14,9 @@ program test_muscle_solver_closest_point_perzyna
     call test_perzyna_non_converged(passed)
     if (.not. passed) STOP 4
 
+    call test_perzyna_reinit_other_types(passed)
+    if (.not. passed) STOP 5
+
     print*, "Passed!", passed
 end program test_muscle_solver_closest_point_perzyna
 
@@ -217,4 +220,76 @@ subroutine test_perzyna_non_converged(passed)
 
     passed = (status .eq. STATUS_NONCONVERGED)
     if (.not. passed) print*, "Case 9 Converged when non converged must occur. status:", status
+end subroutine
+
+subroutine test_perzyna_reinit_other_types(passed)
+    ! A second init with components of larger dynamic types (Elasticity_frozen -> Elasticity_linear,
+    ! VonMises -> Hill48, and a larger overstress law) must give the same step as a solver initialized
+    ! with the second set only. Without reallocating each component, the new data overflow the old
+    ! storage. Perzyna_overstress is the only concrete overstress law, so the larger law is a local
+    ! extension of it with extra storage and the same behaviour.
+    use muscle_tensors
+    use, intrinsic :: iso_fortran_env, only : real64
+    use muscle_vp_perzyna, only : Perzyna_overstress
+    use muscle_hard_bilinear, only : Bilinear_hardening
+    use muscle_hard_swift, only : Swift_hardening
+    use muscle_yield_vonmises, only : VonMises
+    use muscle_yield_hill48, only : Hill48
+    use muscle_elasticity_linear, only : Elasticity_linear
+    use muscle_visco_frozen, only : Elasticity_frozen
+    use muscle_plastic_history, only : Plastic_material_history
+    use muscle_solver_closest_point_perzyna
+    use muscle_test_utils, only : check_approx, check_true
+    implicit none
+
+    type, extends(Perzyna_overstress) :: Larger_overstress
+        real(real64) :: extra(32) = 0D0
+    end type Larger_overstress
+
+    logical, intent(out) :: passed
+    type(Plastic_material_history) :: history, history_ref
+    type(Closest_point) :: solver, fresh
+    type(VonMises) :: vm
+    type(Hill48) :: hill
+    type(ten_3D2Osym) :: strain, strain_p
+    type(Perzyna_overstress) :: pz
+    type(Larger_overstress) :: larger
+    type(Elasticity_linear) :: lin
+    type(Elasticity_frozen) :: frozen
+    type(ten_3D4O2sym) :: tangent, tangent_ref
+    real(real64) :: dt
+    integer :: status, status_ref, iters
+
+    passed = .true.
+    call strain%init(xx=0.08D0, yy=-0.024D0, zz=-0.01D0, xy=0.012D0, yz=-0.007D0, xz=0.004D0)
+    call strain_p%init(xx=0D0, yy=0D0, zz=0D0, xy=0D0, yz=0D0, xz=0D0)
+    call lin%set_parameters(young=1000D0, poisson=0.3D0)
+    call frozen%set(k_alg=1000D0/1.2D0, g_alg=1000D0/2.6D0, stress_hist=strain_p)
+    hill = Hill48(f=0.25D0, g=0.35D0, h=0.65D0, l=1.3D0, m=1.7D0, n=1.45D0)
+    pz%hard_law = Bilinear_hardening(y0=50D0, k=100D0)
+    larger%hard_law = Swift_hardening(k=100D0, n=0.1D0, e0=1D-4)
+    larger%eta = 1D0
+    larger%n = 2D0
+    dt = 1D-1
+
+    call solver%init(elasticity=frozen, viscoplastic=pz, yield=vm)
+    call solver%init(elasticity=lin, viscoplastic=larger, yield=hill)
+    call fresh%init(elasticity=lin, viscoplastic=larger, yield=hill)
+    call history%init(strain_p=strain_p, strain_pf=0D0)
+    call history_ref%init(strain_p=strain_p, strain_pf=0D0)
+    call solver%solve(strain=strain, history=history, dt=dt, status=status, iters=iters)
+    call fresh%solve(strain=strain, history=history_ref, dt=dt, status=status_ref, iters=iters)
+    call check_true(passed, "reinit: converged", status == STATUS_CONVERGED)
+    call check_true(passed, "fresh: converged", status_ref == STATUS_CONVERGED)
+    call check_true(passed, "reinit: plastic step", history%state_np1%strain_pf > 0D0)
+
+    ! Same operations on the same data; Measured: 0
+    call solver%tangent(strain=strain, history=history, dt=dt, tangent=tangent)
+    call fresh%tangent(strain=strain, history=history_ref, dt=dt, tangent=tangent_ref)
+    call check_approx(passed, "reinit: stress", history%state_np1%stress, history_ref%state_np1%stress, tol=0D0)
+    call check_approx(passed, "reinit: plastic strain", history%state_np1%strain_p, &
+                      history_ref%state_np1%strain_p, tol=0D0)
+    call check_approx(passed, "reinit: equivalent plastic strain", history%state_np1%strain_pf, &
+                      history_ref%state_np1%strain_pf, tol=0D0)
+    call check_approx(passed, "reinit: tangent", tangent, tangent_ref, tol=0D0)
 end subroutine
