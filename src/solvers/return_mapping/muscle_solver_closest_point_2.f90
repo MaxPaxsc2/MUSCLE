@@ -124,13 +124,16 @@ module muscle_solver_closest_point_2
             class(Base_hardening_laws), intent(in) :: hardening
             class(Base_yield_critera), intent(in) :: yield
             integer, optional, intent(in) :: iter_nw
-            ! Explicit reallocation: gfortran 13/14 do not reallocate on assignment when the dynamic type changes
-            if (allocated(self%elasticity)) deallocate(self%elasticity)
-            allocate(self%elasticity, source=elasticity)
-            if (allocated(self%hardening)) deallocate(self%hardening)
-            allocate(self%hardening, source=hardening)
-            if (allocated(self%yield)) deallocate(self%yield)
-            allocate(self%yield, source=yield)
+            ! Reallocate only when the dynamic type changes: gfortran 13/14 do not do it on assignment
+            if (allocated(self%elasticity) .and. .not. same_type_as(self%elasticity, elasticity)) &
+                deallocate(self%elasticity)
+            self%elasticity = elasticity
+            if (allocated(self%hardening) .and. .not. same_type_as(self%hardening, hardening)) &
+                deallocate(self%hardening)
+            self%hardening = hardening
+            if (allocated(self%yield) .and. .not. same_type_as(self%yield, yield)) &
+                deallocate(self%yield)
+            self%yield = yield
 
             self%iter_nw = 200
             if (present(iter_nw)) self%iter_nw = iter_nw
