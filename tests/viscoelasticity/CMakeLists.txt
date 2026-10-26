@@ -1,1 +1,2 @@
 add_muscle_test(maxwell test_muscle_visco_maxwell.f90)
+add_muscle_test(maxwell_perzyna test_muscle_visco_maxwell_perzyna.f90)
