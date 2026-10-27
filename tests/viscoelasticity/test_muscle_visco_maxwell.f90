@@ -20,6 +20,18 @@ program test_muscle_visco_maxwell
     call test_closest_point_coupling(passed)
     if (.not. passed) STOP 6
 
+    call test_maxwell_fea_wrapper_cycle(passed)
+    if (.not. passed) STOP 7
+
+    call test_maxwell_frozen_tangents_2d_and_dev(passed)
+    if (.not. passed) STOP 8
+
+    call test_maxwell_gamma_series_small_x(passed)
+    if (.not. passed) STOP 9
+
+    call test_maxwell_init_history_strain_e(passed)
+    if (.not. passed) STOP 10
+
     print*, "Passed!", passed
 end program test_muscle_visco_maxwell
 
@@ -356,3 +368,272 @@ subroutine test_closest_point_coupling(passed)
     call check_true(passed, "coupling: update stores eps_e", &
                     vhist%state_np1%strain_e%is_approx(strain_e, tol=0D0))
 end subroutine test_closest_point_coupling
+
+subroutine test_maxwell_fea_wrapper_cycle(passed)
+    !! Cycle of an FEA wrapper (UMAT/USERMAT style): in every call the state is a new local
+    !! object rebuilt from the flat history array -- init_history, unpack_from_fea, freeze,
+    !! update, pack_to_fea -- and the array is the only thing that survives between calls.
+    !! Reference: the same three steps with a single state kept in memory.
+    !! Hard case: after the update the trial state differs from the converged one, so packing
+    !! state_n instead of state_np1 makes the next step start from a stale history.
+    use, intrinsic :: iso_fortran_env, only : real64
+    use muscle_tensors
+    use muscle_test_utils
+    use muscle_visco_state, only : Viscoelastic_history
+    use muscle_visco_frozen, only : Elasticity_frozen
+    use muscle_visco_base, only : Visco_coefficients
+    use muscle_visco_maxwell, only : Generalized_maxwell
+    implicit none
+    logical, intent(out) :: passed
+
+    type(Generalized_maxwell) :: model
+    type(Viscoelastic_history) :: hist_mem, hist, hist_new
+    type(Elasticity_frozen) :: elas, elas_new
+    type(Visco_coefficients) :: coefs
+    type(ten_3D2Osym) :: eps(3), strain, stress_mem, stress_fea
+    real(real64), parameter :: K = 2000D0, G_INF = 100D0
+    real(real64), parameter :: DTS(3) = [0.05D0, 0.3D0, 2D0]
+    real(real64) :: hsv(18), hsv_out(18)
+    integer :: step
+    character(len=40) :: label
+
+    passed = .true.
+    call model%set_parameters(bulk=K, shear_inf=G_INF, shear=[200D0, 300D0], tau=[0.1D0, 1D0])
+
+    ! Three steps with normals and shears, and a history that is not small
+    call eps(1)%init(xx=1D-3, yy=-4D-4, zz=2D-4, xy=6D-4, yz=-2D-4, xz=1D-4)
+    call eps(2)%init(xx=2D-3, yy=-6D-4, zz=1D-4, xy=3D-4, yz=1D-4, xz=-5D-4)
+    call eps(3)%init(xx=1D-3, yy=-1D-4, zz=5D-4, xy=-8D-4, yz=2D-4, xz=3D-4)
+
+    hsv = 0D0                        ! undeformed point with no viscous history
+    call model%init_history(hist_mem)
+
+    do step = 1, size(DTS)
+        strain = eps(step)
+        coefs = model%coefficients(DTS(step))
+
+        ! Reference: one state kept in memory
+        elas = model%freeze(coefs, hist_mem)
+        stress_mem = elas%stress(strain)
+        call model%update(coefs, strain, hist_mem)
+        call hist_mem%commit()
+
+        ! Wrapper: new local state on every call, all the information in the FEA array
+        call model%init_history(hist)
+        call hist%unpack_from_fea(hsv)
+        elas = model%freeze(coefs, hist)
+        stress_fea = elas%stress(strain)
+        call model%update(coefs, strain, hist)
+        call hist%pack_to_fea(hsv)   ! trial state back to the array, then global convergence
+        call hist%commit()
+
+        write(label, "(A, I0)") "FEA cycle: stress, step ", step
+        ! Same operations on the same numbers: the wrapper must reproduce the state in memory
+        ! exactly. Measured: 0 (bit to bit) in the three steps.
+        call check_approx(passed, trim(label), stress_fea, stress_mem, tol=0D0)
+    end do
+
+    ! Measured: 0 (bit to bit), the memory cycle and the wrapper end in the same state.
+    call check_approx(passed, "FEA cycle: history tensors of state_n", hist%state_n%h(:, 1:2), &
+                      hist_mem%state_n%h(:, 1:2), tol=0D0)
+    call check_approx(passed, "FEA cycle: elastic strain of state_n", hist%state_n%strain_e, &
+                      hist_mem%state_n%strain_e, tol=0D0)
+    call check_approx(passed, "FEA cycle: strain_e of the last pack", hsv(1:6), &
+                      hist_mem%state_n%strain_e%vals, tol=0D0)
+    call check_approx(passed, "FEA cycle: branch 1 of the last pack", hsv(7:12), &
+                      hist_mem%state_n%h(:, 1), tol=0D0)
+    call check_approx(passed, "FEA cycle: branch 2 of the last pack", hsv(13:18), &
+                      hist_mem%state_n%h(:, 2), tol=0D0)
+
+    ! A step that fails before any local solve writes the array back unchanged: the candidate
+    ! state starts equal to the converged one, so packing right after unpacking is the identity.
+    ! Measured: 0 (bit to bit).
+    call model%init_history(hist)
+    call hist%unpack_from_fea(hsv)
+    hsv_out = -1D0                   ! every position has to be written by the pack
+    call hist%pack_to_fea(hsv_out)
+    call check_approx(passed, "FEA cycle: pack right after unpack returns the same array", &
+                      hsv_out, hsv, tol=0D0)
+
+    ! A new material point reuses the same state object: init_history must leave it as a brand
+    ! new one (zero history), so the frozen stress equals the one of an untouched state.
+    ! Measured: 0 (bit to bit).
+    coefs = model%coefficients(0.3D0)
+    call model%init_history(hist)          ! still holds the history of the last step
+    call model%init_history(hist_new)
+    elas = model%freeze(coefs, hist)
+    elas_new = model%freeze(coefs, hist_new)
+    call check_approx(passed, "FEA cycle: init_history clears the history", &
+                      elas%stress(strain), elas_new%stress(strain), tol=0D0)
+end subroutine test_maxwell_fea_wrapper_cycle
+
+subroutine test_maxwell_frozen_tangents_2d_and_dev(passed)
+    !! bulk(), shear(), the plane-strain tangent and the deviatoric tangent of
+    !! Elasticity_frozen, against Elasticity_linear with the same pair (K_alg, G_alg), in a state
+    !! with normals and shears coupled and a non-zero history stress.
+    !! Hard case: the frozen tangent is not the plain elastic one, and the 2-D and deviatoric
+    !! forms are not covered by the 3-D tangent check.
+    use, intrinsic :: iso_fortran_env, only : real64
+    use muscle_tensors
+    use muscle_test_utils
+    use muscle_elasticity_linear, only : Elasticity_linear
+    use muscle_visco_state, only : Viscoelastic_history
+    use muscle_visco_frozen, only : Elasticity_frozen
+    use muscle_visco_base, only : Visco_coefficients
+    use muscle_visco_maxwell, only : Generalized_maxwell
+    implicit none
+    logical, intent(out) :: passed
+
+    type(Generalized_maxwell) :: model
+    type(Viscoelastic_history) :: hist
+    type(Elasticity_frozen) :: elas
+    type(Elasticity_linear) :: lin
+    type(Visco_coefficients) :: coefs
+    type(ten_3D2Osym) :: strain
+    type(ten_2D2Osym) :: strain_2d
+    real(real64), parameter :: K = 2000D0, G_INF = 100D0
+    real(real64) :: e_alg, nu_alg, sum_kg
+
+    passed = .true.
+    call model%set_parameters(bulk=K, shear_inf=G_INF, shear=[200D0, 300D0], tau=[0.1D0, 1D0])
+    call model%init_history(hist)
+
+    ! A previous step leaves a non-zero history stress, so the frozen moduli are (K, G_alg)
+    call strain%init(xx=1D-3, yy=-4D-4, zz=0D0, xy=6D-4, yz=0D0, xz=0D0)
+    call model%update_dt(0.2D0, strain, hist)
+    call hist%commit()
+    call strain%init(xx=7D-4, yy=-1D-4, zz=2D-4, xy=2D-4, yz=-3D-4, xz=5D-4)
+    coefs = model%coefficients(0.3D0)
+    elas = model%freeze(coefs, hist)
+
+    ! Measured: 0 (the frozen object stores the coefficients it was given).
+    call check_approx(passed, "frozen bulk() = K_alg", elas%bulk(), coefs%k_alg, tol=0D0)
+    call check_approx(passed, "frozen shear() = G_alg", elas%shear(), coefs%g_alg, tol=0D0)
+
+    ! Reference: the linear elasticity of the library with the same pair of moduli
+    sum_kg = 3D0*coefs%k_alg + coefs%g_alg
+    e_alg  = 9D0*coefs%k_alg*coefs%g_alg/sum_kg
+    nu_alg = (3D0*coefs%k_alg - 2D0*coefs%g_alg)/(2D0*sum_kg)
+    call lin%set_parameters(young=e_alg, poisson=nu_alg)
+
+    ! The reference is checked before being used: C : strain returns its own stress
+    ! Measured: 0 and 1.3e-16 or less.
+    call strain_2d%init(xx=strain%xx(), yy=strain%yy(), zz=strain%zz(), xy=strain%xy())
+    call check_approx(passed, "reference: 2-D tangent .ddot. strain = 2-D stress", &
+                      lin%dstress_dstrain_2D(strain_2d) .ddot. strain_2d, &
+                      lin%stress_2D(strain_2d), tol=1D-14)
+    call check_approx(passed, "reference: deviatoric tangent .ddot. strain = deviatoric stress", &
+                      lin%dstress_dstrain_dev_3D(strain) .ddot. strain, &
+                      lin%stress_dev_3D(strain), tol=1D-14)
+
+    ! Measured: 5.3e-16 and 2.0e-16 relative (K_alg, G_alg -> E_alg, nu_alg round trip).
+    call check_approx(passed, "frozen 2-D tangent = linear elastic 2-D tangent", &
+                      elas%dstress_dstrain_2D(strain_2d), lin%dstress_dstrain_2D(strain_2d), &
+                      tol=1D-14)
+    call check_approx(passed, "frozen deviatoric tangent = linear elastic deviatoric tangent", &
+                      elas%dstress_dstrain_dev_3D(strain), lin%dstress_dstrain_dev_3D(strain), &
+                      tol=1D-14)
+end subroutine test_maxwell_frozen_tangents_2d_and_dev
+
+subroutine test_maxwell_gamma_series_small_x(passed)
+    !! One step of constant deviatoric strain rate with x = dt/tau = 1e-6, where the model uses
+    !! the three-term series of gamma, against the closed form
+    !! sigma(t) = 2 dev(D) G_1 tau (1 - exp(-x)) of a single Maxwell element (G_inf = 0).
+    !! A second probe at x = 9.9e-4, just below the series threshold, is the worst case for a
+    !! wider threshold: the truncated series loses x^3/24 there.
+    !! Hard case: no case of this file reaches the series branch (the smallest x of
+    !! test_constant_rate is 0.03), so a wrong series is invisible until x is small; the sign of
+    !! the linear term and the position of the threshold show up at x ~ 1e-6 and x ~ 1e-3.
+    use, intrinsic :: iso_fortran_env, only : real64
+    use muscle_tensors
+    use muscle_test_utils
+    use muscle_visco_state, only : Viscoelastic_history
+    use muscle_visco_frozen, only : Elasticity_frozen
+    use muscle_visco_base, only : Visco_coefficients
+    use muscle_visco_maxwell, only : Generalized_maxwell
+    implicit none
+    logical, intent(out) :: passed
+
+    type(Generalized_maxwell) :: model
+    type(Viscoelastic_history) :: hist
+    type(Elasticity_frozen) :: elas
+    type(Visco_coefficients) :: coefs
+    type(ten_3D2Osym) :: rate, strain, stress, expected
+    real(real64), parameter :: K = 2000D0, G_1 = 100D0, TAU = 1D4
+    real(real64), parameter :: DTS(2) = [1D-2, 9.9D0]     ! x = 1e-6 and x = 9.9e-4
+    real(real64) :: x
+    integer :: i
+    character(len=40) :: label
+
+    passed = .true.
+    ! Single Maxwell element and a purely deviatoric rate: the whole stress comes from the
+    ! branch, so the relative error of gamma is the relative error of the stress.
+    call model%set_parameters(bulk=K, shear_inf=0D0, shear=[G_1], tau=[TAU])
+    call rate%init(xx=2D-4, yy=-1D-4, zz=-1D-4, xy=1D-4, yz=3D-5, xz=-2D-5)
+
+    do i = 1, size(DTS)
+        x = DTS(i)/TAU
+        strain = DTS(i)*rate
+        call model%init_history(hist)       ! virgin state: the step starts from zero strain
+        coefs = model%coefficients(DTS(i))
+        elas = model%freeze(coefs, hist)
+        stress = elas%stress(strain)
+        ! 1 - exp(-x) = 2 exp(-x/2) sinh(x/2): no cancellation for small x
+        expected = 2D0*G_1*TAU*(2D0*exp(-x/2D0)*sinh(x/2D0))*(.dev. rate)
+        write(label, "(A, ES9.2)") "gamma series: stress at x =", x
+        ! Covers the series branch (x = 1e-6) and the exact branch next to the threshold
+        ! (x = 9.9e-4). Measured: 1.1e-19 and 4.3e-15 (2.7e-16 and 1.1e-14 relative).
+        call check_approx(passed, trim(label), stress, expected, tol=1D-12)
+    end do
+end subroutine test_maxwell_gamma_series_small_x
+
+subroutine test_maxwell_init_history_strain_e(passed)
+    !! init_history with the initial elastic strain: the state stores it, the frozen stress at
+    !! that strain is the fully relaxed one (the branches carry no stress, so only G_inf
+    !! responds) and a step that keeps the strain does not create branch history.
+    !! Hard case: with the initial strain dropped the same sequence looks like a step from zero
+    !! strain and returns the instantaneous response instead of the relaxed one.
+    use, intrinsic :: iso_fortran_env, only : real64
+    use muscle_tensors
+    use muscle_test_utils
+    use muscle_visco_state, only : Viscoelastic_history
+    use muscle_visco_frozen, only : Elasticity_frozen
+    use muscle_visco_base, only : Visco_coefficients
+    use muscle_visco_maxwell, only : Generalized_maxwell
+    implicit none
+    logical, intent(out) :: passed
+
+    type(Generalized_maxwell) :: model
+    type(Viscoelastic_history) :: hist
+    type(Elasticity_frozen) :: elas
+    type(Visco_coefficients) :: coefs
+    type(ten_3D2Osym) :: strain, expected, vol
+    real(real64), parameter :: K = 2000D0, G_INF = 100D0
+    real(real64) :: tr
+
+    passed = .true.
+    call model%set_parameters(bulk=K, shear_inf=G_INF, shear=[200D0, 300D0], tau=[0.1D0, 1D0])
+    call strain%init(xx=1D-3, yy=-4D-4, zz=2D-4, xy=6D-4, yz=-2D-4, xz=1D-4)
+    call model%init_history(hist, strain_e=strain)   ! elastic strain, no branch stress
+
+    ! Measured: 0 (bit to bit).
+    call check_approx(passed, "init_history: initial elastic strain stored", &
+                      hist%state_n%strain_e, strain, tol=0D0)
+
+    tr = strain%xx() + strain%yy() + strain%zz()
+    call vol%init(xx=K*tr, yy=K*tr, zz=K*tr, xy=0D0, yz=0D0, xz=0D0)
+    expected = vol + 2D0*G_INF*(.dev. strain)   ! relaxed state: only K and G_inf respond
+
+    coefs = model%coefficients(0.5D0)
+    elas = model%freeze(coefs, hist)
+    ! Measured: 2.2e-16 (1.3e-16 relative); G_alg and sum G_k gamma_k cancel to G_inf.
+    call check_approx(passed, "init_history: stress at the initial strain is the relaxed one", &
+                      elas%stress(strain), expected, tol=1D-12)
+
+    ! The increment of the next step is measured from the initial elastic strain
+    call model%update(coefs, strain, hist)
+    call hist%commit()
+    elas = model%freeze(coefs, hist)
+    call check_approx(passed, "init_history: a step at constant strain adds no branch stress", &
+                      elas%stress(strain), expected, tol=1D-12)
+end subroutine test_maxwell_init_history_strain_e
