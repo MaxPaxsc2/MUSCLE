@@ -56,8 +56,20 @@ module muscle_solver_closest_point_perzyna
             class(Base_yield_critera), intent(in) :: yield
             integer, optional, intent(in) :: iter_nw
             real(real64), optional, intent(in) :: tol
+            ! Reallocate only when the dynamic type changes: gfortran 13/14 do not do it on assignment
+            ! Nested ifs: .and. does not short-circuit, and same_type_as on an unallocated component
+            ! reads its _vptr, which is garbage in an OpenMP PRIVATE copy (segfault)
+            if (allocated(self%elasticity)) then
+                if (.not. same_type_as(self%elasticity, elasticity)) deallocate(self%elasticity)
+            end if
             self%elasticity = elasticity
+            if (allocated(self%viscoplastic)) then
+                if (.not. same_type_as(self%viscoplastic, viscoplastic)) deallocate(self%viscoplastic)
+            end if
             self%viscoplastic = viscoplastic
+            if (allocated(self%yield)) then
+                if (.not. same_type_as(self%yield, yield)) deallocate(self%yield)
+            end if
             self%yield = yield
 
             self%iter_nw = 200
