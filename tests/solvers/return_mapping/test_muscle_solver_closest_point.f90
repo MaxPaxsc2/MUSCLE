@@ -32,6 +32,9 @@ program test_muscle_solver_closest_point
     call test_closest_point_vonmises_rollback_retry(passed)
     if (.not. passed) STOP 10
 
+    call test_closest_point_reinit_other_types(passed)
+    if (.not. passed) STOP 11
+
     print*, "Passed!", passed
 end program test_muscle_solver_closest_point
 
@@ -728,3 +731,69 @@ subroutine test_closest_point_vonmises_rollback_retry(passed)
     call retry%pack_to_fea(retry_hsv)
     call check_approx(passed, "Same committed history", retry_hsv, clean_hsv, tol=TOL_SAME_HISTORY)
 end subroutine test_closest_point_vonmises_rollback_retry
+
+
+subroutine test_closest_point_reinit_other_types(passed)
+    ! A second init with components of larger dynamic types (Elasticity_frozen -> Elasticity_linear,
+    ! Swift -> a larger extension of Swift, VonMises -> Hill48) must give the same step as a solver
+    ! initialized with the second set only. Without reallocating each component, the new data
+    ! overflow the old storage.
+    use, intrinsic :: iso_fortran_env
+    use muscle_tensors
+    use muscle_hard_swift
+    use muscle_yield_vonmises
+    use muscle_yield_hill48
+    use muscle_elasticity_linear
+    use muscle_visco_frozen
+    use muscle_plastic_history
+    use muscle_solver_closest_point
+    use muscle_test_utils, only: check_approx, check_true
+    implicit none
+
+    type, extends(Swift_hardening) :: Larger_hardening
+        real(real64) :: extra(32) = 0.0D0
+    end type Larger_hardening
+
+    logical, intent(out) :: passed
+    type(Elasticity_frozen) :: frozen
+    type(Elasticity_linear) :: lin
+    type(Swift_hardening) :: swift
+    type(Larger_hardening) :: larger
+    type(VonMises) :: vm
+    type(Hill48) :: hill
+    type(Closest_point) :: solver, fresh
+    type(Plastic_material_history) :: history, history_ref
+    type(ten_3D2Osym) :: strain
+    type(ten_3D4O2sym) :: tangent, tangent_ref
+    integer :: status, status_ref
+
+    passed = .true.
+    strain = 0.0D0
+    call frozen%set(k_alg=1000.0D0/1.2D0, g_alg=1000.0D0/2.6D0, stress_hist=strain)
+    call lin%set_parameters(young=1000.0D0, poisson=0.3D0)
+    swift = Swift_hardening(k=100.0D0, n=0.1D0, e0=1.0D-4)
+    larger%k = 100.0D0
+    larger%n = 0.1D0
+    larger%e0 = 1.0D-4
+    hill = Hill48(f=0.25D0, g=0.35D0, h=0.65D0, l=1.3D0, m=1.7D0, n=1.45D0)
+    call solver%init(elasticity=frozen, hardening=swift, yield=vm)
+    call solver%init(elasticity=lin, hardening=larger, yield=hill)
+    call fresh%init(elasticity=lin, hardening=larger, yield=hill)
+
+    call strain%init(xx=0.08D0, yy=-0.024D0, zz=-0.01D0, xy=0.012D0, yz=-0.007D0, xz=0.004D0)
+    call solver%solve(strain=strain, history=history, status=status)
+    call fresh%solve(strain=strain, history=history_ref, status=status_ref)
+    call check_true(passed, "reinit: converged", status == STATUS_CONVERGED)
+    call check_true(passed, "fresh: converged", status_ref == STATUS_CONVERGED)
+    call check_true(passed, "reinit: plastic step", history%state_np1%strain_pf > 0.0D0)
+
+    ! Same operations on the same data; Measured: 0
+    call solver%tangent(strain=strain, history=history, tangent=tangent)
+    call fresh%tangent(strain=strain, history=history_ref, tangent=tangent_ref)
+    call check_approx(passed, "reinit: stress", history%state_np1%stress, history_ref%state_np1%stress, tol=0.0D0)
+    call check_approx(passed, "reinit: plastic strain", history%state_np1%strain_p, &
+                      history_ref%state_np1%strain_p, tol=0.0D0)
+    call check_approx(passed, "reinit: equivalent plastic strain", history%state_np1%strain_pf, &
+                      history_ref%state_np1%strain_pf, tol=0.0D0)
+    call check_approx(passed, "reinit: tangent", tangent, tangent_ref, tol=0.0D0)
+end subroutine test_closest_point_reinit_other_types
